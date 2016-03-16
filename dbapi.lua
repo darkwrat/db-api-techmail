@@ -1,15 +1,28 @@
 #!/usb/bin/env tarantool
 
-box.cfg{}
+box.cfg {}
 
-local mysql = require('mysql')
-local conn = mysql.connect({host = localhost, user = 'root', password = '11', db = 'tempdb'})
+local conn = require('mysql').connect({ host = localhost, user = 'root', password = '11', db = 'tempdb' })
 
-local function handler(self)
-    return self:render{ json = conn:execute('select * from forum;') }
+--
+
+local function get_forums_handler(self)
+    if self.method ~= 'GET' then
+        return { status = 504 }
+    end
+
+    local response_data = {
+        code = 0,
+        response = conn:execute('select * from forum where 1')
+    }
+
+    return self:render({ json = response_data })
 end
 
-local httpd = require('http.server')
-local server = httpd.new('*', 8081)
-server:route({ path = '/'  }, handler)
+--
+
+local server = require('http.server').new('*', 8081)
+
+server:route({ path = '/' }, get_forums_handler)
+
 server:start()
