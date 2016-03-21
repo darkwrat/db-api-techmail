@@ -9,35 +9,28 @@ local conn = require('mysql').connect({ host = localhost, user = 'root', passwor
 
 --
 
-local function get_forums_handler(req)
-    log.info('What the hell is going on with our equipment?')
-
-    local response_data = {
+local function get_posts_handler(json_request)
+    log.info('_handler')
+    return {
         code = 0,
-        response = {
-            hello = 'World!'
-        }
+        request = json_request,
+        response = conn:execute('select * from post where 1')
     }
-
---    return response_data
-    return req:render({ json = response_data })
 end
 
-local function hook_before_routes(self, req)
-    log.info('Halo, Welt!')
-    log.info(req)
-end
-
-local function hook_after_dispatch(req, resp)
-    log.info('Auf wieder sehen, Welt!')
-    resp.body = 'Stinky gremlin stole my json!'
-end
 --
 
 local server = require('http.server').new('*', 8081)
 
-server:route({ path = '/', method = 'GET' }, get_forums_handler)
-server:hook('before_routes', hook_before_routes)
-server:hook('after_dispatch', hook_after_dispatch)
+server:route({ path = '/db/api/', method = 'GET' }, get_posts_handler)
+
+server:hook('before_dispatch', function(self, request)
+    log.info('_hook: before_dispatch')
+    return pcall(request.json)
+end)
+server:hook('after_dispatch', function(self, request, request_override, response_data)
+    log.info('_hook: after_dispatch')
+    return request:render({ json = response_data })
+end)
 
 server:start()
