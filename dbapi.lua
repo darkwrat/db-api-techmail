@@ -26,7 +26,7 @@ server:route({ path = '/db/api/', method = 'GET' }, get_posts_handler)
 
 server:hook('before_dispatch', function(self, request)
     log.info('_hook: before_dispatch')
-    return pcall(request.json)
+    return pcall(request:json)
 end)
 server:hook('after_dispatch', function(self, request, request_override, response_data)
     log.info('_hook: after_dispatch')
