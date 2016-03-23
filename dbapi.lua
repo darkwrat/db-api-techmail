@@ -4,6 +4,7 @@ box.cfg {
     log_level = 10,
 }
 
+local json = require('json')
 local log = require('log')
 local conn = require('mysql').connect({ host = localhost, user = 'root', password = '11', db = 'tempdb', raise = true })
 local server = require('http.server').new('*', 8081)
@@ -17,14 +18,24 @@ local function keys_present(obj, keys)
     for _, key in pairs(keys) do
         if not obj[key] then
             return false
+        elseif obj[key] == json.null then
+            obj[key] = nil
         end
     end
     return true
 end
 
-local ResultCode = { Ok = 1, NotFound = 2, BadRequest = 3, MeaninglessRequest = 4, UnknownError = 5, UserExists = 6 }
+local ResultCode = { Ok = 0, NotFound = 1, BadRequest = 2, MeaninglessRequest = 3, UnknownError = 4, UserExists = 5 }
 
 local function create_response(response_code, response_data)
+    -- fixme: here goes driver hack..
+    if type(response_data) == 'table' then
+        for k, v in pairs(response_data) do
+            if type(v) == 'string' and v == "^_null_^" then
+                response_data[k] = json.null
+            end
+        end
+    end
     return { code = response_code, response = response_data }
 end
 
@@ -43,9 +54,11 @@ local api_common_status -- https://github.com/andyudina/technopark-db-api/blob/m
 
 api_common_clear = function(args)
     conn:begin()
+    conn:execute('set foreign_key_checks = 0')
     for _, v in pairs({ 'userfollow', 'usersubscription', 'post', 'thread', 'forum', 'user' }) do
         conn:execute('truncate table ' .. v)
     end
+    conn:execute('set foreign_key_checks = 1')
     conn:commit()
     return create_response(ResultCode.Ok, 'OK')
 end
@@ -82,14 +95,14 @@ api_user_create = function(args)
     if single_value(conn:execute('select 1 from user where email = ? limit 1', args.json.email)) then
         return create_response(ResultCode.UserExists, {})
     end
-    conn:execute('insert into user(username, about, name, email) values (?, ?, ?, ?)',
-        args.json.username, args.json.about, args.json.name, args.json.email)
+    conn:execute('insert into user(username, about, name, email, isAnonymous) values (?, ?, ?, ?, ?)',
+        args.json.username, args.json.about, args.json.name, args.json.email, args.json.isAnonymous and 1 or 0)
     local inserted_id = single_value(conn:execute('select last_insert_id() as x')).x
     conn:commit()
-    if args.json.isAnonymous then
-        conn:execute('update user set isAnonymous = 1 where id = ?',
-            args.json.isAnonymous, inserted_id)
-    end
+    log.info(args.json.isAnonymous)
+--    if args.json.isAnonymous == true then
+--        conn:execute('update user set isAnonymous = 1 where id = ?', inserted_id)
+--    end
     return create_response(ResultCode.Ok, single_value(conn:execute('select * from user where id = ?', inserted_id)))
 end
 
@@ -102,6 +115,7 @@ api_user_details = function(args)
     if not result then
         return create_response(ResultCode.NotFound, {})
     end
+
     local query = 'select u.email from userfollow uf join user u on uf.followed_user_id = u.id where 1 '
     result.following = {}
     for _, v in pairs(conn:execute(query .. ' and uf.follower_user_id = ?', result.id)) do
@@ -115,7 +129,7 @@ api_user_details = function(args)
     for _, v in pairs(conn:execute('select thread_id from usersubscription where user_id = ?', result.id)) do
         table.insert(result.subscriptions, v)
     end
-    return result
+    return create_response(ResultCode.Ok, result)
 end
 
 server:route({ path = '/db/api/user/create', method = 'POST' }, api_user_create)
