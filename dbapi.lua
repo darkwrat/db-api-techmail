@@ -178,6 +178,41 @@ api_user_list_followers = function(args)
     return create_response(ResultCode.Ok, users)
 end
 
+api_user_list_following = function(args)
+    if not keys_present(args.query_params, { 'user' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local following_user = single_value(conn:execute('select * from user where email = ?', args.query_params.user))
+    if not following_user then
+        return create_response(ResultCode.NotFound, {})
+    end
+    local followees_query = 'select * from user where id in ('
+    local followee_id_query = 'select followed_user_id from userfollow where follower_user_id = ?'
+    local since_id = tonumber(args.query_params.since_id)
+    if since_id then
+        followee_id_query = followee_id_query .. ' and followed_user_id >= ' .. since_id
+    end
+    for _, v in pairs(conn:execute(followee_id_query, following_user.id)) do
+        followees_query = followees_query .. v.followed_user_id .. ','
+    end
+    followees_query = followees_query .. '0)'
+    -- fixme: sql injection
+    if args.query_params.order then
+        followees_query = followees_query .. ' order by name ' .. args.query_params.order
+    end
+    -- fixme: sql injection
+    if args.query_params.limit then
+        followees_query = followees_query .. ' limit ' .. args.query_params.limit
+    end
+    log.info(followees_query)
+    local users = {}
+    for _, v in pairs(conn:execute(followees_query)) do
+        fetch_user_details(v)
+        table.insert(users, v)
+    end
+    return create_response(ResultCode.Ok, users)
+end
+
 api_user_unfollow = function(args)
     if not keys_present(args.json, { 'follower', 'followee' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
@@ -210,7 +245,7 @@ server:route({ path = '/db/api/user/create', method = 'POST' }, api_user_create)
 server:route({ path = '/db/api/user/details', method = 'GET' }, api_user_details)
 server:route({ path = '/db/api/user/follow', method = 'POST' }, api_user_follow)
 server:route({ path = '/db/api/user/listFollowers', method = 'GET' }, api_user_list_followers)
---server:route({ path = '/db/api/user/listFollowing', method = 'GET' }, api_user_list_following)
+server:route({ path = '/db/api/user/listFollowing', method = 'GET' }, api_user_list_following)
 --server:route({ path = '/db/api/user/listPosts', method = 'GET' }, api_user_list_posts)
 server:route({ path = '/db/api/user/unfollow', method = 'POST' }, api_user_unfollow)
 server:route({ path = '/db/api/user/updateProfile', method = 'POST' }, api_user_update_profile)
