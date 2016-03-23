@@ -1,8 +1,6 @@
 #!/usr/bin/env tarantool
 
-box.cfg {
-    log_level = 10,
-}
+box.cfg {}
 
 local json = require('json')
 local log = require('log')
@@ -85,7 +83,6 @@ local api_user_list_posts -- https://github.com/andyudina/technopark-db-api/blob
 local api_user_unfollow -- https://github.com/andyudina/technopark-db-api/blob/master/doc/user/unfollow.md
 local api_user_update_profile -- https://github.com/andyudina/technopark-db-api/blob/master/doc/user/updateProfile.md
 
--- fixme: isAnonymous
 api_user_create = function(args)
     if not keys_present(args.json, { 'username', 'about', 'name', 'email' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
@@ -128,10 +125,53 @@ api_user_details = function(args)
     return create_response(ResultCode.Ok, result)
 end
 
+api_user_follow = function(args)
+    if not keys_present(args.json, { 'follower', 'followee' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+
+    local query = 'select id from user where email = ?'
+    local follower_user = single_value(conn:execute(query, args.json.follower))
+    local followed_user = single_value(conn:execute(query, args.json.followee))
+    if not follower_user or not followed_user then
+        return create_response(ResultCode.NotFound, {})
+    end
+    conn:execute('insert into userfollow (follower_user_id, followed_user_id) values (?, ?)', follower_user.id, followed_user.id)
+    return create_response(ResultCode.Ok, single_value(conn:execute('select * from user where id = ?', follower_user.id)))
+end
+
+api_user_list_followers = function(args)
+    if not keys_present(args.query_params, { 'user' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+
+    local followed_user = single_value(conn:execute('select * from user where email = ?', args.query_params.user))
+    if not followed_user then
+        return create_response(ResultCode.NotFound, {})
+    end
+    local query = 'select * from user where id in ('
+    for _, v in pairs(conn:execute('select follower_user_id from userfollow where followed_user_id = ?', followed_user.id)) do
+        if not args.query_params.since_id or v.follower_user_id >= args.query_params.since_id then
+            query = query .. v.follower_user_id .. ','
+        end
+    end
+    query = query .. '0)'
+    -- fixme: sql injection
+    if args.query_params.order then
+        query = query .. ' order by name ' .. args.query_params.order
+    end
+    -- fixme: sql injection
+    if args.query_params.limit then
+        query = query .. ' limit ' .. args.query_params.limit
+    end
+    log.info(query)
+    return create_response(ResultCode.Ok, conn:execute(query))
+end
+
 server:route({ path = '/db/api/user/create', method = 'POST' }, api_user_create)
 server:route({ path = '/db/api/user/details', method = 'GET' }, api_user_details)
---server:route({ path = '/db/api/user/follow', method = 'POST' }, api_user_follow)
---server:route({ path = '/db/api/user/listFollowers', method = 'GET' }, api_user_list_followers)
+server:route({ path = '/db/api/user/follow', method = 'POST' }, api_user_follow)
+server:route({ path = '/db/api/user/listFollowers', method = 'GET' }, api_user_list_followers)
 --server:route({ path = '/db/api/user/listFollowing', method = 'GET' }, api_user_list_following)
 --server:route({ path = '/db/api/user/listPosts', method = 'GET' }, api_user_list_posts)
 --server:route({ path = '/db/api/user/unfollow', method = 'POST' }, api_user_unfollow)
