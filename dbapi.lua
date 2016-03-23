@@ -194,7 +194,7 @@ server:hook('before_dispatch', function(self, request)
     end
     return obj
 end)
-server:hook('after_handler_error', function(self, request, request_override, status, err)
+server:hook('after_handler_error', function(self, request, request_override, err)
     return create_response(ResultCode.UnknownError, err)
 end)
 server:hook('after_dispatch', function(self, request, request_override, response_data)
