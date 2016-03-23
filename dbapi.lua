@@ -94,11 +94,11 @@ api_user_create = function(args)
 end
 
 api_user_details = function(args)
-    if not keys_present(args.query_string, { 'user' }) then
+    if not keys_present(args.query_params, { 'user' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
 
-    local result = single_value(conn:execute('select * from user where email = ?', args.query_string.user))
+    local result = single_value(conn:execute('select * from user where email = ?', args.query_params.user))
     if not result then
         return create_response(ResultCode.NotFound, {})
     end
