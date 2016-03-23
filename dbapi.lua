@@ -99,10 +99,6 @@ api_user_create = function(args)
         args.json.username, args.json.about, args.json.name, args.json.email, args.json.isAnonymous and 1 or 0)
     local inserted_id = single_value(conn:execute('select last_insert_id() as x')).x
     conn:commit()
-    log.info(args.json.isAnonymous)
---    if args.json.isAnonymous == true then
---        conn:execute('update user set isAnonymous = 1 where id = ?', inserted_id)
---    end
     return create_response(ResultCode.Ok, single_value(conn:execute('select * from user where id = ?', inserted_id)))
 end
 
