@@ -178,6 +178,21 @@ api_user_list_followers = function(args)
     return create_response(ResultCode.Ok, users)
 end
 
+api_user_unfollow = function(args)
+    if not keys_present(args.json, { 'follower', 'followee' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local query = 'select * from user where email = ?'
+    local follower_user = single_value(conn:execute(query, args.json.follower))
+    local followed_user = single_value(conn:execute(query, args.json.followee))
+    if not follower_user or not followed_user then
+        return create_response(ResultCode.NotFound, {})
+    end
+    conn:execute('delete from userfollow where follower_user_id = ? and followed_user_id = ?', follower_user.id, followed_user.id)
+    fetch_user_details(follower_user)
+    return create_response(ResultCode.Ok, follower_user)
+end
+
 api_user_update_profile = function(args)
     if not keys_present(args.json, { 'about', 'user', 'name' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
@@ -197,7 +212,7 @@ server:route({ path = '/db/api/user/follow', method = 'POST' }, api_user_follow)
 server:route({ path = '/db/api/user/listFollowers', method = 'GET' }, api_user_list_followers)
 --server:route({ path = '/db/api/user/listFollowing', method = 'GET' }, api_user_list_following)
 --server:route({ path = '/db/api/user/listPosts', method = 'GET' }, api_user_list_posts)
---server:route({ path = '/db/api/user/unfollow', method = 'POST' }, api_user_unfollow)
+server:route({ path = '/db/api/user/unfollow', method = 'POST' }, api_user_unfollow)
 server:route({ path = '/db/api/user/updateProfile', method = 'POST' }, api_user_update_profile)
 
 -- forum
