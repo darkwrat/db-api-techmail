@@ -43,7 +43,7 @@ local api_common_status -- https://github.com/andyudina/technopark-db-api/blob/m
 
 api_common_clear = function(args)
     conn:begin()
-    for _, v in pairs({ 'post', 'thread', 'forum', 'user' }) do
+    for _, v in pairs({ 'userfollow', 'usersubscription', 'post', 'thread', 'forum', 'user' }) do
         conn:execute('truncate table ' .. v)
     end
     conn:commit()
@@ -72,6 +72,7 @@ local api_user_list_posts -- https://github.com/andyudina/technopark-db-api/blob
 local api_user_unfollow -- https://github.com/andyudina/technopark-db-api/blob/master/doc/user/unfollow.md
 local api_user_update_profile -- https://github.com/andyudina/technopark-db-api/blob/master/doc/user/updateProfile.md
 
+-- fixme: isAnonymous
 api_user_create = function(args)
     if not keys_present(args.json, { 'username', 'about', 'name', 'email' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
@@ -85,15 +86,40 @@ api_user_create = function(args)
         args.json.username, args.json.about, args.json.name, args.json.email)
     local inserted_id = single_value(conn:execute('select last_insert_id() as x')).x
     conn:commit()
-    if toboolean(args.json.isAnonymous) then
+    if args.json.isAnonymous then
         conn:execute('update user set isAnonymous = 1 where id = ?',
             args.json.isAnonymous, inserted_id)
     end
     return create_response(ResultCode.Ok, single_value(conn:execute('select * from user where id = ?', inserted_id)))
 end
 
+api_user_details = function(args)
+    if not keys_present(args.query_string, { 'user' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+
+    local result = single_value(conn:execute('select * from user where email = ?', args.query_string.user))
+    if not result then
+        return create_response(ResultCode.NotFound, {})
+    end
+    local query = 'select u.email from userfollow uf join user u on uf.followed_user_id = u.id where 1 '
+    result.following = {}
+    for _, v in pairs(conn:execute(query .. ' and uf.follower_user_id = ?', result.id)) do
+        table.insert(result.following, v)
+    end
+    result.followers = {}
+    for _, v in pairs(conn:execute(query .. ' and uf.followed_user_id = ?', result.id)) do
+        table.insert(result.following, v)
+    end
+    result.subscriptions = {} -- todo: index
+    for _, v in pairs(conn:execute('select thread_id from usersubscription where user_id = ?', result.id)) do
+        table.insert(result.subscriptions, v)
+    end
+    return result
+end
+
 server:route({ path = '/db/api/user/create', method = 'POST' }, api_user_create)
---server:route({ path = '/db/api/user/details', method = 'GET' }, api_user_details)
+server:route({ path = '/db/api/user/details', method = 'GET' }, api_user_details)
 --server:route({ path = '/db/api/user/follow', method = 'POST' }, api_user_follow)
 --server:route({ path = '/db/api/user/listFollowers', method = 'GET' }, api_user_list_followers)
 --server:route({ path = '/db/api/user/listFollowing', method = 'GET' }, api_user_list_following)
