@@ -44,6 +44,23 @@ local function single_value(obj)
     return obj[1]
 end
 
+local function fetch_user_details(user)
+    local query = 'select u.email from userfollow uf join user u on '
+    user.following = {}
+    for _, v in pairs(conn:execute(query .. ' uf.followed_user_id = u.id where uf.follower_user_id = ?', user.id)) do
+        table.insert(user.following, v.email)
+    end
+    user.followers = {}
+    for _, v in pairs(conn:execute(query .. ' uf.follower_user_id = u.id where uf.followed_user_id = ?', user.id)) do
+        table.insert(user.followers, v.email)
+    end
+    user.subscriptions = {} -- todo: index
+    for _, v in pairs(conn:execute('select thread_id from usersubscription where user_id = ?', user.id)) do
+        table.insert(user.subscriptions, v)
+    end
+    return user
+end
+
 -- -- --
 
 -- common
@@ -103,69 +120,75 @@ api_user_details = function(args)
     if not keys_present(args.query_params, { 'user' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
-
-    local result = single_value(conn:execute('select * from user where email = ?', args.query_params.user))
-    if not result then
+    local user = single_value(conn:execute('select * from user where email = ?', args.query_params.user))
+    if not user then
         return create_response(ResultCode.NotFound, {})
     end
-
-    local query = 'select u.email from userfollow uf join user u on uf.followed_user_id = u.id where 1 '
-    result.following = {}
-    for _, v in pairs(conn:execute(query .. ' and uf.follower_user_id = ?', result.id)) do
-        table.insert(result.following, v)
-    end
-    result.followers = {}
-    for _, v in pairs(conn:execute(query .. ' and uf.followed_user_id = ?', result.id)) do
-        table.insert(result.following, v)
-    end
-    result.subscriptions = {} -- todo: index
-    for _, v in pairs(conn:execute('select thread_id from usersubscription where user_id = ?', result.id)) do
-        table.insert(result.subscriptions, v)
-    end
-    return create_response(ResultCode.Ok, result)
+    fetch_user_details(user)
+    return create_response(ResultCode.Ok, user)
 end
 
 api_user_follow = function(args)
     if not keys_present(args.json, { 'follower', 'followee' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
-
-    local query = 'select id from user where email = ?'
+    local query = 'select * from user where email = ?'
     local follower_user = single_value(conn:execute(query, args.json.follower))
     local followed_user = single_value(conn:execute(query, args.json.followee))
     if not follower_user or not followed_user then
         return create_response(ResultCode.NotFound, {})
     end
     conn:execute('insert into userfollow (follower_user_id, followed_user_id) values (?, ?)', follower_user.id, followed_user.id)
-    return create_response(ResultCode.Ok, single_value(conn:execute('select * from user where id = ?', follower_user.id)))
+    fetch_user_details(follower_user)
+    return create_response(ResultCode.Ok, follower_user)
 end
 
 api_user_list_followers = function(args)
     if not keys_present(args.query_params, { 'user' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
-
     local followed_user = single_value(conn:execute('select * from user where email = ?', args.query_params.user))
     if not followed_user then
         return create_response(ResultCode.NotFound, {})
     end
-    local query = 'select * from user where id in ('
-    for _, v in pairs(conn:execute('select follower_user_id from userfollow where followed_user_id = ?', followed_user.id)) do
-        if not args.query_params.since_id or v.follower_user_id >= args.query_params.since_id then
-            query = query .. v.follower_user_id .. ','
-        end
+    local followers_query = 'select * from user where id in ('
+    local follower_id_query = 'select follower_user_id from userfollow where followed_user_id = ?'
+    local since_id = tonumber(args.query_params.since_id)
+    if since_id then
+        follower_id_query = follower_id_query .. ' and follower_user_id >= ' .. since_id
     end
-    query = query .. '0)'
+    for _, v in pairs(conn:execute(follower_id_query, followed_user.id)) do
+        followers_query = followers_query .. v.follower_user_id .. ','
+    end
+    followers_query = followers_query .. '0)'
     -- fixme: sql injection
     if args.query_params.order then
-        query = query .. ' order by name ' .. args.query_params.order
+        followers_query = followers_query .. ' order by name ' .. args.query_params.order
     end
     -- fixme: sql injection
     if args.query_params.limit then
-        query = query .. ' limit ' .. args.query_params.limit
+        followers_query = followers_query .. ' limit ' .. args.query_params.limit
     end
-    log.info(query)
-    return create_response(ResultCode.Ok, conn:execute(query))
+    log.info(followers_query)
+    local users = {}
+    for _, v in pairs(conn:execute(followers_query)) do
+        fetch_user_details(v)
+        table.insert(users, v)
+    end
+    return create_response(ResultCode.Ok, users)
+end
+
+api_user_update_profile = function(args)
+    if not keys_present(args.json, { 'about', 'user', 'name' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    conn:execute('update user set about = ?, name = ? where email = ?', args.json.about, args.json.name, args.json.user)
+    local user = single_value(conn:execute('select * from user where email = ?', args.json.user))
+    if not user then
+        return create_response(ResultCode.NotFound, {})
+    end
+    fetch_user_details(user)
+    return create_response(ResultCode.Ok, user)
 end
 
 server:route({ path = '/db/api/user/create', method = 'POST' }, api_user_create)
@@ -175,7 +198,7 @@ server:route({ path = '/db/api/user/listFollowers', method = 'GET' }, api_user_l
 --server:route({ path = '/db/api/user/listFollowing', method = 'GET' }, api_user_list_following)
 --server:route({ path = '/db/api/user/listPosts', method = 'GET' }, api_user_list_posts)
 --server:route({ path = '/db/api/user/unfollow', method = 'POST' }, api_user_unfollow)
---server:route({ path = '/db/api/user/updateProfile', method = 'POST' }, api_user_update_profile)
+server:route({ path = '/db/api/user/updateProfile', method = 'POST' }, api_user_update_profile)
 
 -- forum
 local api_forum_create -- https://github.com/andyudina/technopark-db-api/blob/master/doc/forum/create.md
