@@ -1,19 +1,34 @@
 diff --git a/mysql/driver.c b/mysql/driver.c
-index 072d97f..68d4e4e 100644
+index 072d97f..3ba5213 100644
 --- a/mysql/driver.c
 +++ b/mysql/driver.c
-@@ -118,39 +118,49 @@ lua_mysql_pushresult(struct lua_State *L, MYSQL *mysql,
+@@ -78,6 +78,19 @@ fetch_result(va_list ap)
+ 	return 0;
+ }
+ 
++extern int luaL_nil_ref;
++
++/**
++ * Push ffi's NULL (cdata<void *>: NULL) onto the stack.
++ * Can be used as replacement of nil in Lua tables.
++ * @param L stack
++ */
++static inline void
++luaL_pushnull(struct lua_State *L)
++{
++	lua_rawgeti(L, LUA_REGISTRYINDEX, luaL_nil_ref);
++}
++
+ /**
+  * push results to lua stack
+  */
+@@ -118,39 +131,44 @@ lua_mysql_pushresult(struct lua_State *L, MYSQL *mysql,
  		int i;
  		for (i = 0; i < mysql_num_fields(result); i++) {
  			lua_pushstring(L, fields[i].name);
 +			if(row[i]) {
 +				switch (fields[i].type) {
-+					case MYSQL_TYPE_TINY: {
-+						int bv = atoi(row[i]);
-+						lua_pushboolean(L, !!bv);
-+						break;
-+					}
-+
++					case MYSQL_TYPE_TINY:
 +					case MYSQL_TYPE_SHORT:
 +					case MYSQL_TYPE_LONG:
 +					case MYSQL_TYPE_FLOAT:
@@ -27,7 +42,7 @@ index 072d97f..68d4e4e 100644
 +					}
 +
 +					case MYSQL_TYPE_NULL:
-+						lua_pushnil(L);
++						luaL_pushnull(L);
 +						break;
 +
 +					case MYSQL_TYPE_LONGLONG: {
@@ -79,7 +94,7 @@ index 072d97f..68d4e4e 100644
 +			}
 +			else
 +			{
-+				lua_pushstring(L, "^_null_^");
++				luaL_pushnull(L);
  			}
  			lua_settable(L, -3);
  		}

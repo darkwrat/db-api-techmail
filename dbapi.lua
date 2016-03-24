@@ -26,14 +26,6 @@ end
 local ResultCode = { Ok = 0, NotFound = 1, BadRequest = 2, MeaninglessRequest = 3, UnknownError = 4, UserExists = 5 }
 
 local function create_response(response_code, response_data)
-    -- fixme: here goes driver hack..
-    if type(response_data) == 'table' then
-        for k, v in pairs(response_data) do
-            if type(v) == 'string' and v == "^_null_^" then
-                response_data[k] = json.null
-            end
-        end
-    end
     return { code = response_code, response = response_data }
 end
 
