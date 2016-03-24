@@ -53,6 +53,25 @@ local function fetch_user_details(user)
     return user
 end
 
+local function fetch_related(entity, related, foreign_key, other_key, is_single)
+    local query = 'select * from ' .. related .. ' where ' .. other_key .. ' = ?'
+    local query_param = entity[foreign_key]
+    entity[foreign_key] = nil
+    if is_single then
+        entity[related] = single_value(conn:execute(query, query_param))
+    else
+        entity[related] = {}
+        for _, v in pairs(conn:execute(query, query_param)) do
+            table.insert(entity[related], v)
+        end
+    end
+    return entity
+end
+
+local function fetch_single_related(entity, related, foreign_key, other_key)
+    return fetch_related(entity, related, foreign_key, other_key, true)
+end
+
 -- -- --
 
 -- common
@@ -249,30 +268,55 @@ local api_forum_list_posts -- https://github.com/andyudina/technopark-db-api/blo
 local api_forum_list_threads -- https://github.com/andyudina/technopark-db-api/blob/master/doc/forum/listThreads.md
 local api_forum_list_users -- https://github.com/andyudina/technopark-db-api/blob/master/doc/forum/listUsers.md
 
---api_forum_create = function(r)
---    if not keys_present(r.json, { 'name', 'short_name', 'user' }) then
---        return create_response(ResultCode.MeaninglessRequest, {})
---    end
---
---    local forum =
---
---    conn:begin()
---    local result = conn:execute('insert into forum (name, short_name, user) values (?, ?, ?)',
---        r.json.name, r.json.short_name, r.json.user)
---    if not result then
---        local inserted_item = conn:execute('select * from forum where id = last_insert_id()')
---        conn:commit()
---        if inserted_item then
---            return create_response(ResultCode.Ok, inserted_item)
---        end
---    end
---
---    conn:rollback()
---    return create_response(ResultCode.UnknownError, {})
---end
+api_forum_create = function(args)
+    if not keys_present(args.json, { 'name', 'short_name', 'user' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
 
---server:route({ path = '/db/api/forum/create', method = 'POST' }, api_forum_create)
---server:route({ path = '/db/api/forum/details', method = 'GET' }, api_forum_details)
+    conn:begin()
+    local forum = single_value(conn:execute('select 1 from forum where short_name = ?', args.json.short_name))
+    if forum then
+        return create_response(ResultCode.Ok, forum)
+    end
+    local user = single_value(conn:execute('select id from user where email = ?', args.json.user))
+    if not user then
+        return create_response(ResultCode.NotFound, {})
+    end
+    conn:execute('insert into forum (name, short_name, user_id) values (?, ?, ?)', args.json.name, args.json.short_name, user.id)
+    forum = conn:execute('select * from forum where id = last_insert_id()')
+    conn:commit()
+    forum['user_id'] = nil
+    forum['user'] = args.json.user
+    return create_response(ResultCode.Ok, forum)
+end
+
+api_forum_details = function(args)
+    if not keys_present(args.query_string, { 'forum' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+
+    local forum = single_value(conn:execute('select * from forum where short_name = ?', args.query_string.forum))
+    if not forum then
+        return create_response(ResultCode.NotFound, {})
+    end
+    if args.query_string.related ~= nil then
+        local related_keys = {}
+        if type(args.query_string.related) == 'string' then
+            table_insert(related_keys, args.query_string.related)
+        else
+            related_keys = args.query_string.related
+        end
+        for _, v in pairs(related_keys) do
+            if v == 'user' then
+                fetch_related(forum, 'user', 'user_id', 'id')
+            end
+        end
+    end
+    return create_response(ResultCode.Ok, forum)
+end
+
+server:route({ path = '/db/api/forum/create', method = 'POST' }, api_forum_create)
+server:route({ path = '/db/api/forum/details', method = 'GET' }, api_forum_details)
 --server:route({ path = '/db/api/forum/listPosts', method = 'GET' }, api_forum_list_posts)
 --server:route({ path = '/db/api/forum/listThreads', method = 'GET' }, api_forum_list_threads)
 --server:route({ path = '/db/api/forum/listUsers', method = 'GET' }, api_forum_list_users)
