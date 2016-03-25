@@ -134,7 +134,7 @@ api_user_details = function(args)
     end
     local user = single_value(conn:execute('select * from user where email = ?', args.query_params.user))
     if not user then
-        return create_response(ResultCode.NotFound, {})
+        return create_response(ResultCode.NotFound, 'user')
     end
     fetch_user_details(user)
     return create_response(ResultCode.Ok, user)
@@ -148,7 +148,7 @@ api_user_follow = function(args)
     local follower_user = single_value(conn:execute(query, args.json.follower))
     local followed_user = single_value(conn:execute(query, args.json.followee))
     if not follower_user or not followed_user then
-        return create_response(ResultCode.NotFound, {})
+        return create_response(ResultCode.NotFound, 'follower_user')
     end
     conn:execute('insert into userfollow (follower_user_id, followed_user_id) values (?, ?)', follower_user.id, followed_user.id)
     fetch_user_details(follower_user)
@@ -161,7 +161,7 @@ api_user_list_followers = function(args)
     end
     local followed_user = single_value(conn:execute('select * from user where email = ?', args.query_params.user))
     if not followed_user then
-        return create_response(ResultCode.NotFound, {})
+        return create_response(ResultCode.NotFound, 'followed_user')
     end
     local followers_query = 'select * from user where id in ('
     local follower_id_query = 'select follower_user_id from userfollow where followed_user_id = ?'
@@ -196,7 +196,7 @@ api_user_list_following = function(args)
     end
     local following_user = single_value(conn:execute('select * from user where email = ?', args.query_params.user))
     if not following_user then
-        return create_response(ResultCode.NotFound, {})
+        return create_response(ResultCode.NotFound, 'follower_user')
     end
     local followees_query = 'select * from user where id in ('
     local followee_id_query = 'select followed_user_id from userfollow where follower_user_id = ?'
@@ -233,7 +233,7 @@ api_user_unfollow = function(args)
     local follower_user = single_value(conn:execute(query, args.json.follower))
     local followed_user = single_value(conn:execute(query, args.json.followee))
     if not follower_user or not followed_user then
-        return create_response(ResultCode.NotFound, {})
+        return create_response(ResultCode.NotFound, { 'follower_user', 'followed_user' })
     end
     conn:execute('delete from userfollow where follower_user_id = ? and followed_user_id = ?', follower_user.id, followed_user.id)
     fetch_user_details(follower_user)
@@ -247,7 +247,7 @@ api_user_update_profile = function(args)
     conn:execute('update user set about = ?, name = ? where email = ?', args.json.about, args.json.name, args.json.user)
     local user = single_value(conn:execute('select * from user where email = ?', args.json.user))
     if not user then
-        return create_response(ResultCode.NotFound, {})
+        return create_response(ResultCode.NotFound, 'user')
     end
     fetch_user_details(user)
     return create_response(ResultCode.Ok, user)
@@ -281,7 +281,7 @@ api_forum_create = function(args)
     end
     local user = single_value(conn:execute('select id from user where email = ?', args.json.user))
     if not user then
-        return create_response(ResultCode.NotFound, {})
+        return create_response(ResultCode.NotFound, 'user')
     end
     conn:execute('insert into forum (name, short_name, user_id) values (?, ?, ?)', args.json.name, args.json.short_name, user.id)
     forum = single_value(conn:execute('select * from forum where id = last_insert_id()'))
@@ -298,7 +298,7 @@ api_forum_details = function(args)
 
     local forum = single_value(conn:execute('select * from forum where short_name = ?', args.query_params.forum))
     if not forum then
-        return create_response(ResultCode.NotFound, {})
+        return create_response(ResultCode.NotFound, 'forum')
     end
     if args.query_params.related ~= nil then
         local related_keys = {}
@@ -337,11 +337,12 @@ local api_thread_update -- https://github.com/andyudina/technopark-db-api/blob/m
 local api_thread_vote -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/vote.md
 
 api_thread_create = function(args)
-    if not keys_present(args.json, { 'forum', 'title', 'isClosed', 'user', 'date', 'message', 'slug' }) then
-        return create_response(ResultCode.MeaninglessRequest, {})
+    local keys_ok, key_missing = keys_present(args.json, { 'forum', 'title', 'isClosed', 'user', 'date', 'message', 'slug' })
+    if not keys_ok then
+        return create_response(ResultCode.MeaninglessRequest, key_missing)
     end
     conn:begin()
-    local user = single_value(conn:execute('select id from user where email = ?', args.json.email))
+    local user = single_value(conn:execute('select id from user where email = ?', args.json.user))
     if not user then
         conn:rollback()
         return create_response(ResultCode.NotFound, 'user')
@@ -364,17 +365,105 @@ api_thread_create = function(args)
 end
 
 api_thread_details = function(args)
-    -- todo
+    if not keys_present(args.query_params, { 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local thread = single_value(conn:execute('select * from thread where id = ?', args.query_params.thread))
+    if not thread then
+        return create_response(ResultCode.NotFound, 'thread')
+    end
+    -- todo: remove copy&paste
+    if args.query_params.related ~= nil then
+        local related_keys = {}
+        if type(args.query_params.related) == 'string' then
+            table.insert(related_keys, args.query_params.related)
+        else
+            related_keys = args.query_params.related
+        end
+        for _, v in pairs(related_keys) do
+            if v == 'user' then
+                fetch_single_related(thread, 'user', 'user_id', 'id')
+            elseif v == 'forum' then
+                fetch_single_related(thread, 'forum', 'forum_id', 'id')
+                local forum_user = single_value(conn:execute('select email from user where id = ?', thread.forum.user_id))
+                if not forum_user then
+                    return create_response(ResultCode.NotFound, 'thread_forum_user')
+                end
+                thread.forum.user = forum_user.email
+            end
+        end
+    end
+    return create_response(ResultCode.Ok, thread)
+end
+
+api_thread_close = function(args)
+    -- todo: убрать copy&paste
+    if not keys_present(args.json, { 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    conn:begin()
+    local thread = single_value(conn:execute('select 1 from thread where id = ?', args.json.thread))
+    if not thread then
+        return create_response(ResultCode.NotFound, 'thread')
+    end
+    conn:execute('update thread set is_closed = 1 where id = ?', args.json.thread)
+    conn:commit()
+    return create_response(ResoltCode.Ok, { thread = thread.id })
+end
+
+api_thread_open = function(args)
+    -- todo: убрать copy&paste
+    if not keys_present(args.json, { 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    conn:begin()
+    local thread = single_value(conn:execute('select id from thread where id = ?', args.json.thread))
+    if not thread then
+        return create_response(ResultCode.NotFound, 'thread')
+    end
+    conn:execute('update thread set is_closed = 0 where id = ?', args.json.thread)
+    conn:commit()
+    return create_response(ResoltCode.Ok, { thread = thread.id })
+end
+
+api_thread_remove = function(args)
+    -- todo: убрать copy&paste
+    if not keys_present(args.json, { 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    conn:begin()
+    local thread = single_value(conn:execute('select id from thread where id = ?', args.json.thread))
+    if not thread then
+        return create_response(ResultCode.NotFound, 'thread')
+    end
+    conn:execute('update thread set is_deleted = 1 where id = ?', args.json.thread)
+    conn:commit()
+    return create_response(ResoltCode.Ok, { thread = thread.id })
+end
+
+api_thread_restore = function(args)
+    -- todo: убрать copy&paste
+    if not keys_present(args.json, { 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    conn:begin()
+    local thread = single_value(conn:execute('select id from thread where id = ?', args.json.thread))
+    if not thread then
+        return create_response(ResultCode.NotFound, 'thread')
+    end
+    conn:execute('update thread set is_deleted = 1 where id = ?', args.json.thread)
+    conn:commit()
+    return create_response(ResoltCode.Ok, { thread = thread.id })
 end
 
 server:route({ path = '/db/api/thread/create', method = 'POST' }, api_thread_create)
---server:route({ path = '/db/api/thread/details', method = 'GET' }, api_thread_details)
---server:route({ path = '/db/api/thread/close', method = 'POST' }, api_thread_close)
+server:route({ path = '/db/api/thread/details', method = 'GET' }, api_thread_details)
+server:route({ path = '/db/api/thread/close', method = 'POST' }, api_thread_close)
 --server:route({ path = '/db/api/thread/list', method = 'GET' }, api_thread_list)
 --server:route({ path = '/db/api/thread/listPosts', method = 'GET' }, api_thread_list_posts)
---server:route({ path = '/db/api/thread/open', method = 'POST' }, api_thread_open)
---server:route({ path = '/db/api/thread/remove', method = 'POST' }, api_thread_remove)
---server:route({ path = '/db/api/thread/restore', method = 'POST' }, api_thread_restore)
+server:route({ path = '/db/api/thread/open', method = 'POST' }, api_thread_open)
+server:route({ path = '/db/api/thread/remove', method = 'POST' }, api_thread_remove)
+server:route({ path = '/db/api/thread/restore', method = 'POST' }, api_thread_restore)
 --server:route({ path = '/db/api/thread/subscribe', method = 'POST' }, api_thread_subscribe)
 --server:route({ path = '/db/api/thread/unsubscribe', method = 'POST' }, api_thread_unsubscribe)
 --server:route({ path = '/db/api/thread/update', method = 'POST' }, api_thread_update)
