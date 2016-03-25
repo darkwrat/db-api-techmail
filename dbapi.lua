@@ -323,9 +323,9 @@ server:route({ path = '/db/api/forum/details', method = 'GET' }, api_forum_detai
 --server:route({ path = '/db/api/forum/listUsers', method = 'GET' }, api_forum_list_users)
 
 -- thread
-local api_thread_close -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/close.md
 local api_thread_create -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/create.md
 local api_thread_details -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/details.md
+local api_thread_close -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/close.md
 local api_thread_list -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/list.md
 local api_thread_list_posts -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/listPosts.md
 local api_thread_open -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/open.md
@@ -336,9 +336,40 @@ local api_thread_unsubscribe -- https://github.com/andyudina/technopark-db-api/b
 local api_thread_update -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/update.md
 local api_thread_vote -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/vote.md
 
---server:route({ path = '/db/api/thread/close', method = 'POST' }, api_thread_close)
---server:route({ path = '/db/api/thread/create', method = 'POST' }, api_thread_create)
+api_thread_create = function(args)
+    if not keys_present(args.json, { 'forum', 'title', 'isClosed', 'user', 'date', 'message', 'slug' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    conn:begin()
+    local user = single_value(conn:execute('select id from user where email = ?', args.json.email))
+    if not user then
+        conn:rollback()
+        return create_response(ResultCode.NotFound, 'user')
+    end
+    local forum = single_value(conn:execute('select id, short_name from forum where short_name = ?', args.json.forum))
+    if not forum then
+        conn:rollback()
+        return create_response(ResultCode.NotFound, 'forum')
+    end
+    conn:execute('insert into thread (forum_id, title, isClosed, user_id, date, message, slug, isDeleted) values (?,?,?,?,?,?,?,?)',
+        forum.id, args.json.title, args.json.isClosed, user.id, args.json.date, args.json.message,
+        args.json.slug, args.json.isDeleted and 1 or 0)
+    local thread = single_value(conn:execute('select * from thread where id = last_insert_id()'))
+    conn:commit()
+    thread.user_id = nil
+    thread.user = args.json.email
+    thread.forum_id = nil
+    thread.forum = forum.short_name
+    return create_response(ResultCode.Ok, thread)
+end
+
+api_thread_details = function(args)
+    -- todo
+end
+
+server:route({ path = '/db/api/thread/create', method = 'POST' }, api_thread_create)
 --server:route({ path = '/db/api/thread/details', method = 'GET' }, api_thread_details)
+--server:route({ path = '/db/api/thread/close', method = 'POST' }, api_thread_close)
 --server:route({ path = '/db/api/thread/list', method = 'GET' }, api_thread_list)
 --server:route({ path = '/db/api/thread/listPosts', method = 'GET' }, api_thread_list_posts)
 --server:route({ path = '/db/api/thread/open', method = 'POST' }, api_thread_open)
