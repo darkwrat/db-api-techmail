@@ -406,9 +406,9 @@ api_thread_close = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    conn:execute('update thread set is_closed = 1 where id = ?', args.json.thread)
+    conn:execute('update thread set isClosed = 1 where id = ?', args.json.thread)
     conn:commit()
-    return create_response(ResoltCode.Ok, { thread = thread.id })
+    return create_response(ResultCode.Ok, { thread = thread.id })
 end
 
 api_thread_open = function(args)
@@ -421,9 +421,9 @@ api_thread_open = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    conn:execute('update thread set is_closed = 0 where id = ?', args.json.thread)
+    conn:execute('update thread set isClosed = 0 where id = ?', args.json.thread)
     conn:commit()
-    return create_response(ResoltCode.Ok, { thread = thread.id })
+    return create_response(ResultCode.Ok, { thread = thread.id })
 end
 
 api_thread_remove = function(args)
@@ -436,9 +436,9 @@ api_thread_remove = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    conn:execute('update thread set is_deleted = 1 where id = ?', args.json.thread)
+    conn:execute('update thread set isDeleted = 1 where id = ?', args.json.thread)
     conn:commit()
-    return create_response(ResoltCode.Ok, { thread = thread.id })
+    return create_response(ResultCode.Ok, { thread = thread.id })
 end
 
 api_thread_restore = function(args)
@@ -451,9 +451,9 @@ api_thread_restore = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    conn:execute('update thread set is_deleted = 1 where id = ?', args.json.thread)
+    conn:execute('update thread set isDeleted = 1 where id = ?', args.json.thread)
     conn:commit()
-    return create_response(ResoltCode.Ok, { thread = thread.id })
+    return create_response(ResultCode.Ok, { thread = thread.id })
 end
 
 api_thread_subscribe = function(args)
@@ -508,7 +508,7 @@ api_thread_update = function(args)
     if not single_value(conn:execute('select 1 from thread where id = ?', args.json.thread)) then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    conn:execute('update thread set message = ?, slug = ? where id = ?', args.json.thread)
+    conn:execute('update thread set message = ?, slug = ? where id = ?', args.json.message, args.json.slug, args.json.thread)
     local thread = single_value(conn:execute('select * from thread where id = ?', args.json.thread))
     if not thread then
         error('oops O_o')
