@@ -90,8 +90,8 @@ api_common_clear = function(args)
     return create_response(ResultCode.Ok, 'OK')
 end
 
--- todo: избавиться от count(*)
 api_common_status = function(args)
+    -- todo: избавиться от count(*)
     local result = {}
     for _, v in pairs({ 'post', 'thread', 'forum', 'user' }) do
         result[v] = single_value(conn:execute('select count(*) as nrows from ' .. v)).nrows
@@ -456,6 +456,80 @@ api_thread_restore = function(args)
     return create_response(ResoltCode.Ok, { thread = thread.id })
 end
 
+api_thread_subscribe = function(args)
+    -- todo: remove copy&paste
+    if not keys_present(args.json, { 'user', 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    conn:begin()
+    local user = single_value(conn:execute('select id,email from user where id = ?', args.json.user))
+    if not user then
+        conn:rollback()
+        return create_response(ResultCode.NotFound, "user")
+    end
+    local thread = single_value(conn:execute('select id from thread where id = ?', args.json.thread))
+    if not thread then
+        conn:rollback()
+        return create_response(ResultCode.NotFound, "thread")
+    end
+    if not single_value(conn:execute('select 1 from usersubscriptions where user_id = ? and thread_id = ?', user.id, thread.id)) then
+        conn:execute('insert into usersubscription (user_id, thread_id) values (?, ?)', user.id, thread.id)
+    end
+    return create_response(ResultCode.Ok, { thread = thread.id, user = user.email })
+end
+
+api_thread_unsubscribe = function(args)
+    -- todo: remove copy&paste
+    if not keys_present(args.json, { 'user', 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    conn:begin()
+    local user = single_value(conn:execute('select id,email from user where id = ?', args.json.user))
+    if not user then
+        conn:rollback()
+        return create_response(ResultCode.NotFound, "user")
+    end
+    local thread = single_value(conn:execute('select id from thread where id = ?', args.json.thread))
+    if not thread then
+        conn:rollback()
+        return create_response(ResultCode.NotFound, "thread")
+    end
+    if single_value(conn:execute('select 1 from usersubscriptions where user_id = ? and thread_id = ?', user.id, thread.id)) then
+        conn:execute('delete from usersubscription where user_id = ? and thread_id = ?', user.id, thread.id)
+    end
+    return create_response(ResultCode.Ok, { thread = thread.id, user = user.email })
+end
+
+api_thread_update = function(args)
+    if not keys_present(args.json, { 'message', 'slug', 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    conn:begin()
+    if not single_value(conn:execute('select 1 from thread where id = ?', args.json.thread)) then
+        return create_response(ResultCode.NotFound, 'thread')
+    end
+    conn:execute('update thread set message = ?, slug = ? where id = ?', args.json.thread)
+    local thread = single_value(conn:execute('select * from thread where id = ?', args.json.thread))
+    if not thread then
+        error('oops O_o')
+    end
+    local user = single_value(conn:execute('select id,email from user where id = ?', thread.user_id))
+    if not user then
+        error('oops O_o x2')
+    end
+    conn:commit()
+    thread.user_id = nil
+    thread.user = user.email
+    return create_response(ResultCode.Ok, thread)
+end
+
+--api_thread_vote = function(args)
+--    if not keys_present(args.json, { 'vote', 'thread' }) then
+--        return create_response(ResultCode.MeaninglessRequest, {})
+--    end
+--    --
+--end
+
 server:route({ path = '/db/api/thread/create', method = 'POST' }, api_thread_create)
 server:route({ path = '/db/api/thread/details', method = 'GET' }, api_thread_details)
 server:route({ path = '/db/api/thread/close', method = 'POST' }, api_thread_close)
@@ -464,9 +538,9 @@ server:route({ path = '/db/api/thread/close', method = 'POST' }, api_thread_clos
 server:route({ path = '/db/api/thread/open', method = 'POST' }, api_thread_open)
 server:route({ path = '/db/api/thread/remove', method = 'POST' }, api_thread_remove)
 server:route({ path = '/db/api/thread/restore', method = 'POST' }, api_thread_restore)
---server:route({ path = '/db/api/thread/subscribe', method = 'POST' }, api_thread_subscribe)
---server:route({ path = '/db/api/thread/unsubscribe', method = 'POST' }, api_thread_unsubscribe)
---server:route({ path = '/db/api/thread/update', method = 'POST' }, api_thread_update)
+server:route({ path = '/db/api/thread/subscribe', method = 'POST' }, api_thread_subscribe)
+server:route({ path = '/db/api/thread/unsubscribe', method = 'POST' }, api_thread_unsubscribe)
+server:route({ path = '/db/api/thread/update', method = 'POST' }, api_thread_update)
 --server:route({ path = '/db/api/thread/vote', method = 'POST' }, api_thread_vote)
 
 -- post
