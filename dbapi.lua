@@ -54,6 +54,7 @@ local function fetch_user_details(user)
 end
 
 local function fetch_related(entity, related, foreign_key, other_key, is_single)
+    is_single = is_single or false
     local query = 'select * from ' .. related .. ' where ' .. other_key .. ' = ?'
     local query_param = entity[foreign_key]
     entity[foreign_key] = nil
@@ -283,7 +284,7 @@ api_forum_create = function(args)
         return create_response(ResultCode.NotFound, {})
     end
     conn:execute('insert into forum (name, short_name, user_id) values (?, ?, ?)', args.json.name, args.json.short_name, user.id)
-    forum = conn:execute('select * from forum where id = last_insert_id()')
+    forum = single_value(conn:execute('select * from forum where id = last_insert_id()'))
     conn:commit()
     forum['user_id'] = nil
     forum['user'] = args.json.user
@@ -291,24 +292,24 @@ api_forum_create = function(args)
 end
 
 api_forum_details = function(args)
-    if not keys_present(args.query_string, { 'forum' }) then
+    if not keys_present(args.query_params, { 'forum' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
 
-    local forum = single_value(conn:execute('select * from forum where short_name = ?', args.query_string.forum))
+    local forum = single_value(conn:execute('select * from forum where short_name = ?', args.query_params.forum))
     if not forum then
         return create_response(ResultCode.NotFound, {})
     end
-    if args.query_string.related ~= nil then
+    if args.query_params.related ~= nil then
         local related_keys = {}
-        if type(args.query_string.related) == 'string' then
-            table_insert(related_keys, args.query_string.related)
+        if type(args.query_params.related) == 'string' then
+            table.insert(related_keys, args.query_params.related)
         else
-            related_keys = args.query_string.related
+            related_keys = args.query_params.related
         end
         for _, v in pairs(related_keys) do
             if v == 'user' then
-                fetch_related(forum, 'user', 'user_id', 'id')
+                fetch_single_related(forum, 'user', 'user_id', 'id')
             end
         end
     end
