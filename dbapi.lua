@@ -309,6 +309,8 @@ api_forum_details = function(args)
         for _, v in pairs(related_keys) do
             if v == 'user' then
                 fetch_single_related(forum, 'user', 'user_id', 'id')
+            else
+                return create_response(ResultCode.MeaninglessRequest, {})
             end
         end
     end
@@ -389,6 +391,8 @@ api_thread_details = function(args)
                     return create_response(ResultCode.NotFound, 'thread_forum_user')
                 end
                 thread.forum.user = forum_user.email
+            else
+                return create_response(ResultCode.MeaninglessRequest, {})
             end
         end
     end
@@ -641,6 +645,8 @@ api_post_details = function(args)
             elseif v == 'forum' then
                 fetch_single_related(post, 'forum', 'forum_id', 'id')
                 post.forum_id = nil
+            else
+                return create_response(ResultCode.MeaninglessRequest, {})
             end
         end
         for _, v in pairs(related_keys) do
