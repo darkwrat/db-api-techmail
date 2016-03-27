@@ -726,10 +726,48 @@ api_thread_vote = function(args)
     return create_response(ResultCode.Ok, updated_thread)
 end
 
+api_thread_list = function(args)
+    local threads_query = ' select t.*, u.email as user, count(*) as posts, f.short_name as forum, cast(t.likes - t.dislikes as signed) as points '
+            .. ' from thread t '
+            .. ' join user u on t.user_id = u.id '
+            .. ' join forum f on t.forum_id = f.id '
+            .. ' left join post p on t.id = p.thread_id '
+    if args.query_params.forum then
+        local forum = single_value(conn:execute('select id,short_name from forum where short_name = ?', args.query_params.forum))
+        if not forum then
+            return create_response(ResultCode.NotFound, 'forum')
+        end
+        threads_query = threads_query .. ' where f.id = ' .. forum.id .. ' '
+    elseif args.query_params.user then
+        local user = single_value(conn:execute('select id,email from user where email = ?', args.query_params.user))
+        if not user then
+            return create_response(ResultCode.NotFound, 'user')
+        end
+        threads_query = threads_query .. ' where u.id = ' .. user.id .. ' '
+    else
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    if args.query_params.since then
+        threads_query = threads_query .. ' and t.date > \'' .. conn:quote(args.query_params.since) .. '\' '
+    end
+    threads_query = threads_query .. ' group by t.id order by t.date '
+    if args.query_params.order then
+        threads_query = threads_query .. ' ' .. conn:quote(args.query_params.order) .. ' '
+    else
+        threads_query = threads_query .. ' desc '
+    end
+    if args.query_params.limit then
+        threads_query = threads_query .. ' limit ' .. conn:quote(args.query_params.limit)
+    end
+    log.info(threads_query)
+    local threads = conn:execute(threads_query)
+    return create_response(ResultCode.Ok, threads)
+end
+
 server:route({ path = '/db/api/thread/create', method = 'POST' }, api_thread_create)
 server:route({ path = '/db/api/thread/details', method = 'GET' }, api_thread_details)
 server:route({ path = '/db/api/thread/close', method = 'POST' }, api_thread_close)
---server:route({ path = '/db/api/thread/list', method = 'GET' }, api_thread_list)
+server:route({ path = '/db/api/thread/list', method = 'GET' }, api_thread_list)
 --server:route({ path = '/db/api/thread/listPosts', method = 'GET' }, api_thread_list_posts)
 server:route({ path = '/db/api/thread/open', method = 'POST' }, api_thread_open)
 server:route({ path = '/db/api/thread/remove', method = 'POST' }, api_thread_remove)
