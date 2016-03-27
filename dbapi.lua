@@ -317,11 +317,34 @@ api_forum_details = function(args)
     return create_response(ResultCode.Ok, forum)
 end
 
+api_forum_list_users = function(args)
+    if not keys_present(args.query_params, { 'forum' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local forum = single_value(conn:execute('select id, short_name from forum where short_name = ?', args.query_params.forum))
+    if not forum then
+        return create_response(ResultCode.NotFound, 'forum')
+    end
+    local users_query = 'select distinct u.* from post p join forum f on p.forum_id = f.id join user u on p.user_id = u.id where f.id = ? order by name '
+    -- fixme: sql injection
+    if args.query_params.order then
+        users_query = users_query .. ' ' .. args.query_params.order .. ' '
+    end
+    if args.query_params.limit then
+        users_query = users_query .. ' limit ' .. args.query_params.limit .. ' '
+    end
+    local users = conn:execute(users_query, forum.id)
+    for _, v in pairs(users) do
+        fetch_user_details(v)
+    end
+    return create_response(ResultCode.Ok, users)
+end
+
 server:route({ path = '/db/api/forum/create', method = 'POST' }, api_forum_create)
 server:route({ path = '/db/api/forum/details', method = 'GET' }, api_forum_details)
 --server:route({ path = '/db/api/forum/listPosts', method = 'GET' }, api_forum_list_posts)
 --server:route({ path = '/db/api/forum/listThreads', method = 'GET' }, api_forum_list_threads)
---server:route({ path = '/db/api/forum/listUsers', method = 'GET' }, api_forum_list_users)
+server:route({ path = '/db/api/forum/listUsers', method = 'GET' }, api_forum_list_users)
 
 -- thread
 local api_thread_create -- https://github.com/andyudina/technopark-db-api/blob/master/doc/thread/create.md
