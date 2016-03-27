@@ -925,9 +925,46 @@ api_post_vote = function(args)
     return create_response(ResultCode.Ok, updated_post)
 end
 
+api_post_list = function(args)
+    local posts_query = 'select p.*, p.thread_id as thread, p.parent_post_id as parent, '
+            .. ' p.likes - p.dislikes as points, u.email as user, f.short_name as forum '
+            .. ' from post p join user u on p.user_id = u.id '
+            .. ' join forum f on p.forum_id = f.id '
+            .. ' join thread t on p.thread_id = t.id '
+    if args.query_params.forum then
+        local forum = single_value(conn:execute('select id,short_name from forum where short_name = ?', args.query_params.forum))
+        if not forum then
+            create_response(ResultCode.NotFound, 'forum')
+        end
+        posts_query  = posts_query .. ' where f.id = ' .. forum.id .. ' '
+    elseif args.query_params.thread then
+        local thread = single_value(conn:execute('select id from thread where id = ?', args.query_params.thread))
+        if not thread then
+            create_response(ResultCode.NotFound, 'thread')
+        end
+        posts_query  = posts_query .. ' where t.id = ' .. thread.id .. ' '
+    else
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    if args.query_params.since then
+        posts_query = posts_query .. ' and p.date >= \'' .. conn:quote(args.query_params.since) .. '\' '
+    end
+    posts_query = posts_query .. ' order by p.date '
+    if args.query_params.order then
+        posts_query = posts_query .. ' ' .. conn:quote(args.query_params.order) .. ' '
+    else
+        posts_query = posts_query .. ' desc '
+    end
+    if args.query_params.limit then
+        posts_query = posts_query .. ' limit ' .. conn:quote(args.query_params.limit) .. ' '
+    end
+    log.info(posts_query)
+    return create_response(ResultCode.Ok, conn:execute(posts_query))
+end
+
 server:route({ path = '/db/api/post/create', method = 'POST' }, api_post_create)
 server:route({ path = '/db/api/post/details', method = 'GET' }, api_post_details)
---server:route({ path = '/db/api/post/list', method = 'GET' }, api_post_list)
+server:route({ path = '/db/api/post/list', method = 'GET' }, api_post_list)
 server:route({ path = '/db/api/post/remove', method = 'POST' }, api_post_remove)
 server:route({ path = '/db/api/post/restore', method = 'POST' }, api_post_restore)
 server:route({ path = '/db/api/post/update', method = 'POST' }, api_post_update)
