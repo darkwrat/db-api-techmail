@@ -1,5 +1,5 @@
 diff --git a/mysql/driver.c b/mysql/driver.c
-index 072d97f..12e1470 100644
+index 072d97f..48cd22c 100644
 --- a/mysql/driver.c
 +++ b/mysql/driver.c
 @@ -78,6 +78,19 @@ fetch_result(va_list ap)
@@ -22,11 +22,24 @@ index 072d97f..12e1470 100644
  /**
   * push results to lua stack
   */
-@@ -118,39 +131,48 @@ lua_mysql_pushresult(struct lua_State *L, MYSQL *mysql,
+@@ -118,39 +131,49 @@ lua_mysql_pushresult(struct lua_State *L, MYSQL *mysql,
  		int i;
  		for (i = 0; i < mysql_num_fields(result); i++) {
  			lua_pushstring(L, fields[i].name);
-+			if(row[i]) {
+-
+-			switch(fields[i].type) {
+-				case MYSQL_TYPE_TINY:
+-				case MYSQL_TYPE_SHORT:
+-				case MYSQL_TYPE_LONG:
+-				case MYSQL_TYPE_FLOAT:
+-				case MYSQL_TYPE_INT24:
+-				case MYSQL_TYPE_DOUBLE: {
+-					lua_pushlstring(L, row[i], len[i]);
+-					double v = lua_tonumber(L, -1);
+-					lua_pop(L, 1);
+-					lua_pushnumber(L, v);
+-					break;
++			if (row[i]) {
 +				switch (fields[i].type) {
 +					case MYSQL_TYPE_TINY:
 +					case MYSQL_TYPE_SHORT:
@@ -41,40 +54,29 @@ index 072d97f..12e1470 100644
 +						break;
 +					}
 +
-+					case MYSQL_TYPE_NULL:
++					case MYSQL_TYPE_NULL: {
 +						luaL_pushnull(L);
 +						break;
++					}
 +
 +					case MYSQL_TYPE_LONGLONG: {
-+							long long v = atoll(row[i]);
-+							if (fields[i].flags & UNSIGNED_FLAG) {
-+								luaL_pushuint64(L, v);
-+							} else {
-+								luaL_pushint64(L, v);
-+							}
-+							break;
++						long long v = atoll(row[i]);
++						if (fields[i].flags & UNSIGNED_FLAG) {
++							luaL_pushuint64(L, v);
++						} else {
++							luaL_pushint64(L, v);
++						}
++						break;
 +					}
 +
 +					/* AS string */
 +					case MYSQL_TYPE_NEWDECIMAL:
 +					case MYSQL_TYPE_DECIMAL:
 +					case MYSQL_TYPE_TIMESTAMP:
-+					default:
++					default: {
 +						lua_pushlstring(L, row[i], len[i]);
 +						break;
- 
--			switch(fields[i].type) {
--				case MYSQL_TYPE_TINY:
--				case MYSQL_TYPE_SHORT:
--				case MYSQL_TYPE_LONG:
--				case MYSQL_TYPE_FLOAT:
--				case MYSQL_TYPE_INT24:
--				case MYSQL_TYPE_DOUBLE: {
--					lua_pushlstring(L, row[i], len[i]);
--					double v = lua_tonumber(L, -1);
--					lua_pop(L, 1);
--					lua_pushnumber(L, v);
--					break;
++					}
  				}
 -
 -				case MYSQL_TYPE_NULL:
