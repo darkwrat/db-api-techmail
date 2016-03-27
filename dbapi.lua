@@ -427,9 +427,69 @@ api_forum_list_threads = function(args)
     return create_response(ResultCode.Ok, threads)
 end
 
+api_forum_list_posts = function(args)
+    if not keys_present(args.query_params, { 'forum' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local forum = single_value(conn:execute('select id,short_name from forum where short_name = ?', args.query_params.forum))
+    if not forum then
+        return create_response(ResultCode.NotFound, 'forum')
+    end
+    local posts_query = 'select p.*, p.thread_id as thread, p.parent_post_id as parent, '
+            .. ' p.likes - p.dislikes as points, u.email as user, f.short_name as forum '
+            .. ' from post p join user u on p.user_id = u.id '
+            .. ' join forum f on p.forum_id = f.id '
+            .. ' where f.id = ? '
+    if args.query_params.since then
+        posts_query = posts_query .. ' and p.date >= \'' .. conn:quote(args.query_params.since) .. '\' '
+    end
+    posts_query = posts_query .. ' order by p.date '
+    if args.query_params.order then
+        posts_query = posts_query .. ' ' .. conn:quote(args.query_params.order) .. ' '
+    else
+        posts_query = posts_query .. ' desc '
+    end
+    if args.query_params.limit then
+        posts_query = posts_query .. ' limit ' .. conn:quote(args.query_params.limit) .. ' '
+    end
+    local posts = conn:execute(posts_query, forum.id)
+    if args.query_params.related ~= nil then
+        for _, post in pairs(posts) do
+            local related_keys = {}
+            if type(args.query_params.related) == 'string' then
+                table.insert(related_keys, args.query_params.related)
+            else
+                related_keys = args.query_params.related
+            end
+            for _, v in pairs(related_keys) do
+                if v == 'user' then
+                    fetch_single_related(post, 'user', 'user_id', 'id')
+                    fetch_user_details(post.user)
+                elseif v == 'forum' then
+                    fetch_single_related(post, 'forum', 'forum_id', 'id')
+                    -- todo: убрать подпорку
+                    post.forum.user = single_value(conn:execute('select id,email from user where id = ?', post.forum.user_id)).email
+                elseif v == 'thread' then
+                    fetch_single_related(post, 'thread', 'thread_id', 'id')
+                    -- todo: убрать подпорки
+                    post.thread.user = single_value(conn:execute('select id,email from user where id = ?', post.thread.user_id)).email
+                    post.thread.forum = forum.short_name
+                    post.thread.posts = single_value(
+                        conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', post.thread.id)
+                    ).nposts
+                    post.thread.points = post.thread.likes - post.thread.dislikes
+                else
+                    return create_response(ResultCode.MeaninglessRequest, {})
+                end
+            end
+        end
+    end
+    return create_response(ResultCode.Ok, posts)
+end
+
 server:route({ path = '/db/api/forum/create', method = 'POST' }, api_forum_create)
 server:route({ path = '/db/api/forum/details', method = 'GET' }, api_forum_details)
---server:route({ path = '/db/api/forum/listPosts', method = 'GET' }, api_forum_list_posts)
+server:route({ path = '/db/api/forum/listPosts', method = 'GET' }, api_forum_list_posts)
 server:route({ path = '/db/api/forum/listThreads', method = 'GET' }, api_forum_list_threads)
 server:route({ path = '/db/api/forum/listUsers', method = 'GET' }, api_forum_list_users)
 
@@ -776,6 +836,7 @@ api_post_details = function(args)
                 post.thread.posts = single_value(
                     conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', post.thread.id)
                 ).nposts
+                post.thread.points = post.thread.likes - post.thread.dislikes
             elseif v == 'forum' then
                 local forum_user = single_value(conn:execute('select email from user where id = ?', post.forum.user_id))
                 if not forum_user then
