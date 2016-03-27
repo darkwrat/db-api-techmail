@@ -57,7 +57,6 @@ local function fetch_related(entity, related, foreign_key, other_key, is_single)
     is_single = is_single or false
     local query = 'select * from ' .. related .. ' where ' .. other_key .. ' = ?'
     local query_param = entity[foreign_key]
-    entity[foreign_key] = nil
     if is_single then
         entity[related] = single_value(conn:execute(query, query_param))
     else
@@ -181,7 +180,7 @@ api_user_list_followers = function(args)
     if args.query_params.limit then
         followers_query = followers_query .. ' limit ' .. args.query_params.limit
     end
-    log.info(followers_query)
+--    log.info(followers_query)
     local users = {}
     for _, v in pairs(conn:execute(followers_query)) do
         fetch_user_details(v)
@@ -216,7 +215,7 @@ api_user_list_following = function(args)
     if args.query_params.limit then
         followees_query = followees_query .. ' limit ' .. args.query_params.limit
     end
-    log.info(followees_query)
+--    log.info(followees_query)
     local users = {}
     for _, v in pairs(conn:execute(followees_query)) do
         fetch_user_details(v)
@@ -393,6 +392,13 @@ api_thread_details = function(args)
             end
         end
     end
+    -- todo: переформулировать схему базы и убрать эти подпорки
+    if not thread.user then
+        thread.user = single_value(conn:execute('select email from user where id = ?', thread.user_id)).email
+    end
+    if not thread.forum then
+        thread.forum = single_value(conn:execute('select short_name from forum where id = ?', thread.forum_id)).short_name
+    end
     return create_response(ResultCode.Ok, thread)
 end
 
@@ -523,12 +529,23 @@ api_thread_update = function(args)
     return create_response(ResultCode.Ok, thread)
 end
 
---api_thread_vote = function(args)
---    if not keys_present(args.json, { 'vote', 'thread' }) then
---        return create_response(ResultCode.MeaninglessRequest, {})
---    end
---    --
---end
+api_thread_vote = function(args)
+    if not keys_present(args.json, { 'vote', 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local thread = single_value(conn:execute('select id from thread where id = ?', args.json.thread))
+    if not thread then
+        return create_response(ResultCode.NotFound, 'thread')
+    end
+    if vote == 1 then
+        conn:execute('update thread set likes = likes + 1 where id = ?', thread.id)
+    elseif vote == -1 then
+        conn:execute('update thread set dislikes = dislikes + 1 where id = ?', thread.id)
+    else
+        return create_response(ResultCode.MeaninglessRequest, 'vote')
+    end
+    return create_response(ResultCode.ok, single_value(conn:execute('select * from thread where id = ', thread.id)))
+end
 
 server:route({ path = '/db/api/thread/create', method = 'POST' }, api_thread_create)
 server:route({ path = '/db/api/thread/details', method = 'GET' }, api_thread_details)
@@ -541,7 +558,7 @@ server:route({ path = '/db/api/thread/restore', method = 'POST' }, api_thread_re
 server:route({ path = '/db/api/thread/subscribe', method = 'POST' }, api_thread_subscribe)
 server:route({ path = '/db/api/thread/unsubscribe', method = 'POST' }, api_thread_unsubscribe)
 server:route({ path = '/db/api/thread/update', method = 'POST' }, api_thread_update)
---server:route({ path = '/db/api/thread/vote', method = 'POST' }, api_thread_vote)
+server:route({ path = '/db/api/thread/vote', method = 'POST' }, api_thread_vote)
 
 -- post
 local api_post_create -- https://github.com/andyudina/technopark-db-api/blob/master/doc/post/create.md
@@ -552,17 +569,151 @@ local api_post_restore -- https://github.com/andyudina/technopark-db-api/blob/ma
 local api_post_update -- https://github.com/andyudina/technopark-db-api/blob/master/doc/post/update.md
 local api_post_vote -- https://github.com/andyudina/technopark-db-api/blob/master/doc/post/vote.md
 
---server:route({ path = '/db/api/post/create', method = 'POST' }, api_post_create)
---server:route({ path = '/db/api/post/details', method = 'GET' }, api_post_details)
+api_post_create = function(args)
+    if not keys_present(args.json, { 'date', 'thread', 'message', 'user', 'forum' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local thread = single_value(conn:execute('select id from thread where id = ?', args.json.thread))
+    if not thread then
+        return create_response(ResultCode.NotFound, 'thread')
+    end
+    local forum = single_value(conn:execute('select id,short_name from forum where short_name = ?', args.json.forum))
+    if not forum then
+        return create_response(ResultCode.NotFound, 'forum')
+    end
+    local user = single_value(conn:execute('select id,email from user where email = ?', args.json.user))
+    if not user then
+        return create_response(ResultCode.NotFound, 'user')
+    end
+    local parent_post = {}
+    if type(args.json.parent) == 'number' and args.json.parent > 0 then
+        parent_post = single_value(conn:execute('select id from post where id = ?', args.json.parent))
+        if not parent_post then
+            return create_response(ResultCode.NotFound, 'parent')
+        end
+    end
+    conn:begin()
+    conn:execute('insert into post(date, thread_id, message, user_id, forum_id, parent_post_id,' ..
+            ' isApproved, isHighlighted, isEdited, isSpam, isDeleted) values(?,?,?,?,?,?,?,?,?,?,?)',
+        args.json.date, thread.id, args.json.message, user.id, forum.id, parent_post.id,
+        args.json.isApproved and 1 or 0, args.json.isHighlighted and 1 or 0,
+        args.json.isEdited and 1 or 0, args.json.isSpam and 1 or 0, args.json.isDeleted and 1 or 0)
+    local post = single_value(conn:execute('select * from post where id = last_insert_id()'))
+    conn:commit()
+    post.parent = post.parent_post_id
+    post.parent_post_id = nil
+    post.forum = forum.short_name
+    post.user = user.email
+    return create_response(ResultCode.Ok, post)
+end
+
+api_post_details = function(args)
+    if not keys_present(args.query_params, { 'post' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local post = single_value(conn:execute('select * from post where id = ?', args.query_params.post))
+    if not post then
+        return create_response(ResultCode.NotFound, 'post')
+    end
+    post.parent = post.parent_post_id
+    post.parent_post_id = nil
+    -- todo: remove copy&paste
+    if args.query_params.related then
+        local related_keys = {}
+        if type(args.query_params.related) == 'string' then
+            table.insert(related_keys, args.query_params.related)
+        else
+            related_keys = args.query_params.related
+        end
+        log.info(table.concat(related_keys, ','))
+        for _, v in pairs(related_keys) do
+            if v == 'user' then
+                fetch_single_related(post, 'user', 'user_id', 'id')
+                post.user_id = nil
+            elseif v == 'thread' then
+                fetch_single_related(post, 'thread', 'thread_id', 'id')
+                post.thread_id = nil
+            elseif v == 'forum' then
+                fetch_single_related(post, 'forum', 'forum_id', 'id')
+                post.forum_id = nil
+            end
+        end
+        for _, v in pairs(related_keys) do
+            if v == 'thread' then
+                local thread_user = single_value(conn:execute('select email from user where id = ?', post.thread.user_id))
+                if not thread_user then
+                    return create_response(ResultCode.NotFound, 'post_thread_user')
+                end
+                post.thread.user = thread_user.email
+                post.thread.user_id = nil
+                local thread_forum = single_value(conn:execute('select short_name from forum where id = ?', post.thread.forum_id))
+                if not thread_forum then
+                    return create_response(ResultCode.NotFound, 'post_thread_user')
+                end
+                post.thread.forum = thread_forum.short_name
+                post.thread.forum_id = nil
+                post.thread.posts = single_value(
+                    conn:execute('select count(*) as nposts from post where thread_id = ?', post.thread.id)
+                ).nposts
+            elseif v == 'forum' then
+                local forum_user = single_value(conn:execute('select email from user where id = ?', post.forum.user_id))
+                if not forum_user then
+                    return create_response(ResultCode.NotFound, 'post_forum_user')
+                end
+                post.forum.user = forum_user.email
+                post.forum.user_id = nil
+            end
+        end
+    end
+    -- todo: переформулировать схему базы, убрать подпорки
+    if not post.user then
+        post.user = single_value(conn:execute('select email from user where id = ?', post.user_id)).email
+    end
+    if not post.thread then
+        post.thread = post.thread_id
+    end
+    if not post.forum then
+        post.forum = single_value(conn:execute('select short_name from forum where id = ?', post.forum_id)).short_name
+    end
+    return create_response(ResultCode.Ok, post)
+end
+
+api_post_remove = function(args)
+    if not keys_present(args.json, { 'post' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local post = single_value(conn:execute('select id from post where id = ?', args.json.post))
+    if not post then
+        return create_response(ResultCode.NotFound, {})
+    end
+    conn:execute('update post set isDeleted = 1 where id = ?', post.id)
+    return create_response(ResultCode.Ok, { post = post.id })
+end
+
+api_post_restore = function(args)
+    if not keys_present(args.json, { 'post' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local post = single_value(conn:execute('select id from post where id = ?', args.json.post))
+    if not post then
+        return create_response(ResultCode.NotFound, {})
+    end
+    conn:execute('update post set isDeleted = 0 where id = ?', post.id)
+    return create_response(ResultCode.Ok, { post = post.id })
+end
+
+server:route({ path = '/db/api/post/create', method = 'POST' }, api_post_create)
+server:route({ path = '/db/api/post/details', method = 'GET' }, api_post_details)
 --server:route({ path = '/db/api/post/list', method = 'GET' }, api_post_list)
---server:route({ path = '/db/api/post/remove', method = 'POST' }, api_post_remove)
---server:route({ path = '/db/api/post/restore', method = 'POST' }, api_post_restore)
+server:route({ path = '/db/api/post/remove', method = 'POST' }, api_post_remove)
+server:route({ path = '/db/api/post/restore', method = 'POST' }, api_post_restore)
 --server:route({ path = '/db/api/post/update', method = 'POST' }, api_post_update)
 --server:route({ path = '/db/api/post/vote', method = 'POST' }, api_post_vote)
 
 -- -- --
 
 server:hook('before_dispatch', function(self, request)
+--    log.info(request.body)
     local obj = {}
     if request.method ~= 'GET' then
         local status, err = pcall(function() obj.json = request:json() end)
@@ -578,7 +729,9 @@ server:hook('after_handler_error', function(self, request, request_override, err
     return create_response(ResultCode.UnknownError, err)
 end)
 server:hook('after_dispatch', function(self, request, request_override, response_data)
-    return request:render({ json = response_data })
+    local response = request:render({ json = response_data })
+    log.info(response.body)
+    return response
 end)
 
 server:start()
