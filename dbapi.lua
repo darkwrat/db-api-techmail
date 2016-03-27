@@ -345,10 +345,57 @@ api_forum_list_users = function(args)
     return create_response(ResultCode.Ok, users)
 end
 
+api_forum_list_threads = function(args)
+    if not keys_present(args.query_params, { 'forum' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local threads_query = ' select t.*, u.email as user, count(*) as posts, f.short_name as forum, (t.likes - t.dislikes) as points '
+            .. ' from thread t join post p on t.id = p.thread_id '
+            .. ' join user u on t.user_id = u.id '
+            .. ' join forum f on t.forum_id = f.id '
+            .. ' where f.short_name = ? '
+    if args.query_params.since then
+        threads_query = threads_query .. ' and t.date > \'' .. conn:quote(args.query_params.since) .. '\' '
+    end
+    threads_query = threads_query .. ' group by t.id order by t.date '
+    if args.query_params.order then
+        threads_query = threads_query .. ' ' .. conn:quote(args.query_params.order) .. ' '
+    else
+        threads_query = threads_query .. ' desc '
+    end
+    if args.query_params.limit then
+        threads_query = threads_query .. ' limit ' .. conn:quote(args.query_params.limit)
+    end
+    log.info(threads_query)
+    local threads = conn:execute(threads_query, args.query_params.forum)
+    if args.query_params.related ~= nil then
+        for _, thread in pairs(threads) do
+            local related_keys = {}
+            if type(args.query_params.related) == 'string' then
+                table.insert(related_keys, args.query_params.related)
+            else
+                related_keys = args.query_params.related
+            end
+            for _, v in pairs(related_keys) do
+                if v == 'user' then
+                    fetch_single_related(thread, 'user', 'user_id', 'id')
+                elseif v == 'forum' then
+                    fetch_single_related(thread, 'forum', 'forum_id', 'id')
+                    -- todo: убрать подпорку
+                    thread.forum.user = single_value(conn:execute('select id,email from user where id = ?', thread.forum.user_id)).email
+                else
+                    return create_response(ResultCode.MeaninglessRequest, {})
+                end
+            end
+        end
+    end
+    return create_response(ResultCode.Ok, threads)
+end
+
 server:route({ path = '/db/api/forum/create', method = 'POST' }, api_forum_create)
 server:route({ path = '/db/api/forum/details', method = 'GET' }, api_forum_details)
 --server:route({ path = '/db/api/forum/listPosts', method = 'GET' }, api_forum_list_posts)
---server:route({ path = '/db/api/forum/listThreads', method = 'GET' }, api_forum_list_threads)
+server:route({ path = '/db/api/forum/listThreads', method = 'GET' }, api_forum_list_threads)
 server:route({ path = '/db/api/forum/listUsers', method = 'GET' }, api_forum_list_users)
 
 -- thread
