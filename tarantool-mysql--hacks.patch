@@ -98,3 +98,30 @@ index 072d97f..3ba5213 100644
  			}
  			lua_settable(L, -3);
  		}
+diff --git a/mysql/init.lua b/mysql/init.lua
+index ffa253e..2f840bd 100644
+--- a/mysql/init.lua
++++ b/mysql/init.lua
+@@ -49,6 +49,14 @@ local function close(self)
+     return self.driver:close()
+ end
+ 
++-- quote string
++local function quote(self, str)
++    if type(str) ~= 'string' then
++        return nil
++    end
++    return self.driver:quote(str)
++end
++
+ -- example:
+ -- local tuples, arows = db:execute(sql, args)
+ --   tuples - a table of tuples (tables)
+@@ -118,6 +126,7 @@ conn_mt = {
+         begin = begin;
+         rollback = rollback;
+         commit = commit;
++        quote = quote;
+     }
+ }
+ 
