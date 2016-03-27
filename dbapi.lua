@@ -392,6 +392,9 @@ api_thread_details = function(args)
             end
         end
     end
+    thread.posts = single_value(
+        conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', thread.id)
+    ).nposts
     -- todo: переформулировать схему базы и убрать эти подпорки
     if not thread.user then
         thread.user = single_value(conn:execute('select email from user where id = ?', thread.user_id)).email
@@ -399,6 +402,7 @@ api_thread_details = function(args)
     if not thread.forum then
         thread.forum = single_value(conn:execute('select short_name from forum where id = ?', thread.forum_id)).short_name
     end
+    thread.points = thread.likes - thread.dislikes
     return create_response(ResultCode.Ok, thread)
 end
 
@@ -442,7 +446,8 @@ api_thread_remove = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    conn:execute('update thread set isDeleted = 1 where id = ?', args.json.thread)
+    conn:execute('update post set isDeleted = 1 where thread_id = ?', thread.id)
+    conn:execute('update thread set isDeleted = 1 where id = ?', thread.id)
     conn:commit()
     return create_response(ResultCode.Ok, { thread = thread.id })
 end
@@ -457,7 +462,8 @@ api_thread_restore = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    conn:execute('update thread set isDeleted = 1 where id = ?', args.json.thread)
+    conn:execute('update post set isDeleted = 0 where thread_id = ?', thread.id)
+    conn:execute('update thread set isDeleted = 0 where id = ?', thread.id)
     conn:commit()
     return create_response(ResultCode.Ok, { thread = thread.id })
 end
@@ -481,6 +487,7 @@ api_thread_subscribe = function(args)
     if not single_value(conn:execute('select 1 from usersubscriptions where user_id = ? and thread_id = ?', user.id, thread.id)) then
         conn:execute('insert into usersubscription (user_id, thread_id) values (?, ?)', user.id, thread.id)
     end
+    conn:commit()
     return create_response(ResultCode.Ok, { thread = thread.id, user = user.email })
 end
 
@@ -537,14 +544,17 @@ api_thread_vote = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    if vote == 1 then
+    if tonumber(args.json.vote) == 1 then
         conn:execute('update thread set likes = likes + 1 where id = ?', thread.id)
-    elseif vote == -1 then
+    elseif tonumber(args.json.vote) == -1 then
         conn:execute('update thread set dislikes = dislikes + 1 where id = ?', thread.id)
     else
         return create_response(ResultCode.MeaninglessRequest, 'vote')
     end
-    return create_response(ResultCode.ok, single_value(conn:execute('select * from thread where id = ', thread.id)))
+    local updated_thread = single_value(conn:execute('select * from thread where id = ?', thread.id))
+    updated_thread.forum = single_value(conn:execute('select short_name from forum where id = ?', updated_thread.forum_id)).short_name
+    updated_thread.user = single_value(conn:execute('select email from user where id = ?', updated_thread.user_id)).email
+    return create_response(ResultCode.Ok, updated_thread)
 end
 
 server:route({ path = '/db/api/thread/create', method = 'POST' }, api_thread_create)
@@ -653,7 +663,7 @@ api_post_details = function(args)
                 post.thread.forum = thread_forum.short_name
                 post.thread.forum_id = nil
                 post.thread.posts = single_value(
-                    conn:execute('select count(*) as nposts from post where thread_id = ?', post.thread.id)
+                    conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', post.thread.id)
                 ).nposts
             elseif v == 'forum' then
                 local forum_user = single_value(conn:execute('select email from user where id = ?', post.forum.user_id))
