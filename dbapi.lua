@@ -325,7 +325,12 @@ api_forum_list_users = function(args)
     if not forum then
         return create_response(ResultCode.NotFound, 'forum')
     end
-    local users_query = 'select distinct u.* from post p join forum f on p.forum_id = f.id join user u on p.user_id = u.id where f.id = ? order by name '
+    local users_query = 'select distinct u.* from post p join forum f on p.forum_id = f.id join user u on p.user_id = u.id where f.id = ? '
+    -- fixme: sql injection
+    if args.query_params.since_id then
+        users_query = users_query .. ' and u.id >= ' .. args.query_params.since_id
+    end
+    users_query = users_query .. ' order by name '
     -- fixme: sql injection
     if args.query_params.order then
         users_query = users_query .. ' ' .. args.query_params.order .. ' '
