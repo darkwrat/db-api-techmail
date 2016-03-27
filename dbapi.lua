@@ -252,12 +252,41 @@ api_user_update_profile = function(args)
     return create_response(ResultCode.Ok, user)
 end
 
+api_user_list_posts = function(args)
+    if not keys_present(args.query_params, { 'user' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local user = single_value(conn:execute('select id,email from user where email = ?', args.query_params.user))
+    if not user then
+        return create_response(ResultCode.NotFound, 'user')
+    end
+    local posts_query = 'select p.*, p.thread_id as thread, p.parent_post_id as parent, '
+            .. ' p.likes - p.dislikes as points, u.email as user, f.short_name as forum '
+            .. ' from post p join user u on p.user_id = u.id '
+            .. ' join forum f on p.forum_id = f.id '
+            .. ' where u.id = ? '
+    if args.query_params.since then
+        posts_query = posts_query .. ' and p.date >= \'' .. conn:quote(args.query_params.since) .. '\' '
+    end
+    posts_query = posts_query .. ' order by p.date '
+    if args.query_params.order then
+        posts_query = posts_query .. ' ' .. conn:quote(args.query_params.order) .. ' '
+    else
+        posts_query = posts_query .. ' desc '
+    end
+    if args.query_params.limit then
+        posts_query = posts_query .. ' limit ' .. conn:quote(args.query_params.limit) .. ' '
+    end
+    local posts = conn:execute(posts_query, user.id)
+    return create_response(ResultCode.Ok, posts)
+end
+
 server:route({ path = '/db/api/user/create', method = 'POST' }, api_user_create)
 server:route({ path = '/db/api/user/details', method = 'GET' }, api_user_details)
 server:route({ path = '/db/api/user/follow', method = 'POST' }, api_user_follow)
 server:route({ path = '/db/api/user/listFollowers', method = 'GET' }, api_user_list_followers)
 server:route({ path = '/db/api/user/listFollowing', method = 'GET' }, api_user_list_following)
---server:route({ path = '/db/api/user/listPosts', method = 'GET' }, api_user_list_posts)
+server:route({ path = '/db/api/user/listPosts', method = 'GET' }, api_user_list_posts)
 server:route({ path = '/db/api/user/unfollow', method = 'POST' }, api_user_unfollow)
 server:route({ path = '/db/api/user/updateProfile', method = 'POST' }, api_user_update_profile)
 
@@ -349,11 +378,16 @@ api_forum_list_threads = function(args)
     if not keys_present(args.query_params, { 'forum' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
-    local threads_query = ' select t.*, u.email as user, count(*) as posts, f.short_name as forum, (t.likes - t.dislikes) as points '
-            .. ' from thread t join post p on t.id = p.thread_id '
+    local forum = single_value(conn:execute('select id,short_name from forum where short_name = ?', args.query_params.forum))
+    if not forum then
+        return create_response(ResultCode.NotFound, 'forum')
+    end
+    local threads_query = ' select t.*, u.email as user, count(*) as posts, f.short_name as forum, cast(t.likes - t.dislikes as signed) as points '
+            .. ' from thread t '
             .. ' join user u on t.user_id = u.id '
             .. ' join forum f on t.forum_id = f.id '
-            .. ' where f.short_name = ? '
+            .. ' left join post p on t.id = p.thread_id '
+            .. ' where t.forum_id = ? '
     if args.query_params.since then
         threads_query = threads_query .. ' and t.date > \'' .. conn:quote(args.query_params.since) .. '\' '
     end
@@ -367,7 +401,7 @@ api_forum_list_threads = function(args)
         threads_query = threads_query .. ' limit ' .. conn:quote(args.query_params.limit)
     end
     log.info(threads_query)
-    local threads = conn:execute(threads_query, args.query_params.forum)
+    local threads = conn:execute(threads_query, forum.id)
     if args.query_params.related ~= nil then
         for _, thread in pairs(threads) do
             local related_keys = {}
@@ -379,6 +413,7 @@ api_forum_list_threads = function(args)
             for _, v in pairs(related_keys) do
                 if v == 'user' then
                     fetch_single_related(thread, 'user', 'user_id', 'id')
+                    fetch_user_details(thread.user)
                 elseif v == 'forum' then
                     fetch_single_related(thread, 'forum', 'forum_id', 'id')
                     -- todo: убрать подпорку
