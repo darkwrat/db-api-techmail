@@ -48,7 +48,7 @@ local function fetch_user_details(user)
     end
     user.subscriptions = {} -- todo: index
     for _, v in pairs(conn:execute('select thread_id from usersubscription where user_id = ?', user.id)) do
-        table.insert(user.subscriptions, v)
+        table.insert(user.subscriptions, v.thread_id)
     end
     return user
 end
@@ -473,21 +473,18 @@ api_thread_subscribe = function(args)
     if not keys_present(args.json, { 'user', 'thread' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
-    conn:begin()
-    local user = single_value(conn:execute('select id,email from user where id = ?', args.json.user))
+    local user = single_value(conn:execute('select id,email from user where email = ?', args.json.user))
     if not user then
-        conn:rollback()
         return create_response(ResultCode.NotFound, "user")
     end
     local thread = single_value(conn:execute('select id from thread where id = ?', args.json.thread))
     if not thread then
-        conn:rollback()
         return create_response(ResultCode.NotFound, "thread")
     end
-    if not single_value(conn:execute('select 1 from usersubscriptions where user_id = ? and thread_id = ?', user.id, thread.id)) then
+    -- todo: пересмотреть
+    pcall(function()
         conn:execute('insert into usersubscription (user_id, thread_id) values (?, ?)', user.id, thread.id)
-    end
-    conn:commit()
+    end)
     return create_response(ResultCode.Ok, { thread = thread.id, user = user.email })
 end
 
@@ -496,20 +493,18 @@ api_thread_unsubscribe = function(args)
     if not keys_present(args.json, { 'user', 'thread' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
-    conn:begin()
-    local user = single_value(conn:execute('select id,email from user where id = ?', args.json.user))
+    local user = single_value(conn:execute('select id,email from user where email = ?', args.json.user))
     if not user then
-        conn:rollback()
         return create_response(ResultCode.NotFound, "user")
     end
     local thread = single_value(conn:execute('select id from thread where id = ?', args.json.thread))
     if not thread then
-        conn:rollback()
         return create_response(ResultCode.NotFound, "thread")
     end
-    if single_value(conn:execute('select 1 from usersubscriptions where user_id = ? and thread_id = ?', user.id, thread.id)) then
+    -- todo: пересмотреть
+    pcall(function()
         conn:execute('delete from usersubscription where user_id = ? and thread_id = ?', user.id, thread.id)
-    end
+    end)
     return create_response(ResultCode.Ok, { thread = thread.id, user = user.email })
 end
 
@@ -685,6 +680,7 @@ api_post_details = function(args)
     if not post.forum then
         post.forum = single_value(conn:execute('select short_name from forum where id = ?', post.forum_id)).short_name
     end
+    post.points = post.likes - post.dislikes
     return create_response(ResultCode.Ok, post)
 end
 
@@ -712,18 +708,57 @@ api_post_restore = function(args)
     return create_response(ResultCode.Ok, { post = post.id })
 end
 
+api_post_update = function(args)
+    if not keys_present(args.json, { 'post', 'message' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local post = single_value(conn:execute('select id from post where id = ?', args.json.post))
+    if not post then
+        return create_response(ResultCode.NotFound, 'post')
+    end
+    conn:execute('update post set message = ? where id = ?', args.json.message, post.id)
+    local updated_post = single_value(conn:execute('select * from post where id = ?', post.id))
+    -- todo: убрать подпорки
+    updated_post.forum = single_value(conn:execute('select short_name from forum where id = ?', updated_post.forum_id)).short_name
+    updated_post.user = single_value(conn:execute('select email from user where id = ?', updated_post.forum_id)).email
+    updated_post.thread = updated_post.thread_id
+    return create_response(ResultCode.Ok, updated_post)
+end
+
+api_post_vote = function(args)
+    if not keys_present(args.json, { 'vote', 'post' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local post = single_value(conn:execute('select id from post where id = ?', args.json.post))
+    if not post then
+        return create_response(ResultCode.NotFound, 'post')
+    end
+    if tonumber(args.json.vote) == 1 then
+        conn:execute('update post set likes = likes + 1 where id = ?', post.id)
+    elseif tonumber(args.json.vote) == -1 then
+        conn:execute('update post set dislikes = dislikes + 1 where id = ?', post.id)
+    else
+        return create_response(ResultCode.MeaninglessRequest, 'vote')
+    end
+    local updated_post = single_value(conn:execute('select * from post where id = ?', post.id))
+    -- todo: убрать подпорки
+    updated_post.forum = single_value(conn:execute('select short_name from forum where id = ?', updated_post.forum_id)).short_name
+    updated_post.user = single_value(conn:execute('select email from user where id = ?', updated_post.forum_id)).email
+    updated_post.thread = updated_post.thread_id
+    return create_response(ResultCode.Ok, updated_post)
+end
+
 server:route({ path = '/db/api/post/create', method = 'POST' }, api_post_create)
 server:route({ path = '/db/api/post/details', method = 'GET' }, api_post_details)
 --server:route({ path = '/db/api/post/list', method = 'GET' }, api_post_list)
 server:route({ path = '/db/api/post/remove', method = 'POST' }, api_post_remove)
 server:route({ path = '/db/api/post/restore', method = 'POST' }, api_post_restore)
---server:route({ path = '/db/api/post/update', method = 'POST' }, api_post_update)
---server:route({ path = '/db/api/post/vote', method = 'POST' }, api_post_vote)
+server:route({ path = '/db/api/post/update', method = 'POST' }, api_post_update)
+server:route({ path = '/db/api/post/vote', method = 'POST' }, api_post_vote)
 
 -- -- --
 
 server:hook('before_dispatch', function(self, request)
---    log.info(request.body)
     local obj = {}
     if request.method ~= 'GET' then
         local status, err = pcall(function() obj.json = request:json() end)
@@ -739,9 +774,7 @@ server:hook('after_handler_error', function(self, request, request_override, err
     return create_response(ResultCode.UnknownError, err)
 end)
 server:hook('after_dispatch', function(self, request, request_override, response_data)
-    local response = request:render({ json = response_data })
-    log.info(response.body)
-    return response
+    return request:render({ json = response_data })
 end)
 
 server:start()
