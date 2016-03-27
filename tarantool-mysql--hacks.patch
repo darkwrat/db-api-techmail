@@ -1,5 +1,5 @@
 diff --git a/mysql/driver.c b/mysql/driver.c
-index 072d97f..3ba5213 100644
+index 072d97f..12e1470 100644
 --- a/mysql/driver.c
 +++ b/mysql/driver.c
 @@ -78,6 +78,19 @@ fetch_result(va_list ap)
@@ -22,7 +22,7 @@ index 072d97f..3ba5213 100644
  /**
   * push results to lua stack
   */
-@@ -118,39 +131,44 @@ lua_mysql_pushresult(struct lua_State *L, MYSQL *mysql,
+@@ -118,39 +131,48 @@ lua_mysql_pushresult(struct lua_State *L, MYSQL *mysql,
  		int i;
  		for (i = 0; i < mysql_num_fields(result); i++) {
  			lua_pushstring(L, fields[i].name);
@@ -47,7 +47,11 @@ index 072d97f..3ba5213 100644
 +
 +					case MYSQL_TYPE_LONGLONG: {
 +							long long v = atoll(row[i]);
-+							luaL_pushuint64(L, v);
++							if (fields[i].flags & UNSIGNED_FLAG) {
++								luaL_pushuint64(L, v);
++							} else {
++								luaL_pushint64(L, v);
++							}
 +							break;
 +					}
 +
