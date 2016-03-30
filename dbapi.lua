@@ -764,11 +764,60 @@ api_thread_list = function(args)
     return create_response(ResultCode.Ok, threads)
 end
 
+api_thread_list_posts = function(args)
+    if not keys_present(args.query_params, { 'thread' }) then
+        return create_response(ResultCode.MeaninglessRequest, {})
+    end
+    local thread = single_value(conn:execute('select id from thread where id = ?', args.query_params.thread))
+    if not thread then
+        return create_response(ResultCode.NotFound, 'thread')
+    end
+    --
+    local posts_query = 'select p.*, p.thread_id as thread, p.parent_post_id as parent, '
+            .. ' p.likes - p.dislikes as points, u.email as user, f.short_name as forum '
+            .. ' from post p join user u on p.user_id = u.id '
+            .. ' join forum f on p.forum_id = f.id '
+            .. ' join thread t on p.thread_id = t.id '
+            .. ' where t.id = ? '
+    --
+    if args.query_params.since then
+        posts_query = posts_query .. ' and p.date >= \'' .. conn:quote(args.query_params.since) .. '\' '
+    end
+    --
+    if args.query_params.sort == 'parent_tree' then
+        local parent_posts_query = 'select lpad(id, 11, \'0\') as mpath_prefix from post where parent_post_id is null '
+        if args.query_params.limit then
+            parent_posts_query = parent_posts_query .. ' limit ' .. conn:quote(args.query_params.limit) .. ' '
+        end
+        posts_query = posts_query .. ' and ( 0 '
+        for _, v in pairs(conn:execute(parent_posts_query)) do
+            posts_query = posts_query .. ' or mpath like(\'' .. v.mpath_prefix .. '%\') '
+        end
+        posts_query = posts_query .. ' ) '
+    end
+    --
+    posts_query = posts_query .. ' order by null '
+    if args.query_params.sort and args.query_params.sort ~= 'flat' then
+        posts_query = posts_query ..', mpath ' .. conn:quote(args.query_params.order) .. ' '
+    end
+    if args.query_params.order then
+        posts_query = posts_query .. ', p.date ' .. conn:quote(args.query_params.order) .. ' '
+    else
+        posts_query = posts_query .. ' desc '
+    end
+    local posts_query_body = ' '
+    if args.query_params.limit  and args.query_params.sort ~= 'parent_tree' then
+        posts_query = posts_query .. ' limit ' .. conn:quote(args.query_params.limit) .. ' '
+    end
+    log.info(string.gsub(posts_query, '%%','/'))
+    return create_response(ResultCode.Ok, conn:execute(posts_query, thread.id))
+end
+
 server:route({ path = '/db/api/thread/create', method = 'POST' }, api_thread_create)
 server:route({ path = '/db/api/thread/details', method = 'GET' }, api_thread_details)
 server:route({ path = '/db/api/thread/close', method = 'POST' }, api_thread_close)
 server:route({ path = '/db/api/thread/list', method = 'GET' }, api_thread_list)
---server:route({ path = '/db/api/thread/listPosts', method = 'GET' }, api_thread_list_posts)
+server:route({ path = '/db/api/thread/listPosts', method = 'GET' }, api_thread_list_posts)
 server:route({ path = '/db/api/thread/open', method = 'POST' }, api_thread_open)
 server:route({ path = '/db/api/thread/remove', method = 'POST' }, api_thread_remove)
 server:route({ path = '/db/api/thread/restore', method = 'POST' }, api_thread_restore)
@@ -815,6 +864,16 @@ api_post_create = function(args)
         args.json.date, thread.id, args.json.message, user.id, forum.id, parent_post.id,
         args.json.isApproved and 1 or 0, args.json.isHighlighted and 1 or 0,
         args.json.isEdited and 1 or 0, args.json.isSpam and 1 or 0, args.json.isDeleted and 1 or 0)
+    local insert_id = single_value(conn:execute('select last_insert_id() as value')).value
+    -- fixme: hack
+    local post_mpath = single_value(conn:execute(
+            'select group_concat(lpad(p.parent_id, 11, \'0\') separator \'/\') as value from ( '
+            .. ' select @id := (select parent_post_id from post where id = @id) as parent_id, @n := @n+1 as n '
+            .. ' from (select @id := ?, @n := 0) _ '
+            .. ' straight_join post where @id is not null union select ?, 0 order by n desc) p ',
+        insert_id, insert_id)).value
+    --
+    conn:execute('update post set mpath = ? where id = ?', post_mpath, insert_id)
     local post = single_value(conn:execute('select * from post where id = last_insert_id()'))
     conn:commit()
     post.parent = post.parent_post_id
