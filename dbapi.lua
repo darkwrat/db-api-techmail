@@ -4,8 +4,8 @@ box.cfg {}
 
 local json = require('json')
 local log = require('log')
-local conn = require('mysql').connect({ host = localhost, user = 'root', password = '11', db = 'tempdb', raise = true })
-local server = require('http.server').new('*', 8081)
+local conn = require('mysql').connect({ host = localhost, user = 'root', password = 'password', db = 'tempdb', raise = true })
+local server = require('http.server').new('*', 5000)
 
 -- -- --
 
