@@ -785,15 +785,19 @@ api_thread_list_posts = function(args)
     end
     --
     if args.query_params.sort == 'parent_tree' then
-        local parent_posts_query = 'select lpad(id, 11, \'0\') as mpath_prefix from post where parent_post_id is null '
+        local parent_posts_query = 'select id from post where parent_post_id is null and thread_id = ? '
+        if args.query_params.since then
+            parent_posts_query = parent_posts_query .. ' and date >= \'' .. conn:quote(args.query_params.since) .. '\' '
+        end
         if args.query_params.limit then
             parent_posts_query = parent_posts_query .. ' limit ' .. conn:quote(args.query_params.limit) .. ' '
         end
-        posts_query = posts_query .. ' and ( 0 '
-        for _, v in pairs(conn:execute(parent_posts_query)) do
-            posts_query = posts_query .. ' or mpath like(\'' .. v.mpath_prefix .. '%\') '
+        local parent_post_ids = {}
+        for _, v in pairs(conn:execute(parent_posts_query, thread.id)) do
+            table.insert(parent_post_ids, v.id)
         end
-        posts_query = posts_query .. ' ) '
+        local parent_post_id_concat = table.concat(parent_post_ids, ',')
+        posts_query = posts_query .. ' and (p.id in (' .. parent_post_id_concat .. ') or p.topmost_parent_post_id in (' .. parent_post_id_concat .. ')) '
     end
     --
     posts_query = posts_query .. ' order by null '
@@ -866,14 +870,22 @@ api_post_create = function(args)
         args.json.isEdited and 1 or 0, args.json.isSpam and 1 or 0, args.json.isDeleted and 1 or 0)
     local insert_id = single_value(conn:execute('select last_insert_id() as value')).value
     -- fixme: hack
-    local post_mpath = single_value(conn:execute(
-            'select group_concat(lpad(p.parent_id, 11, \'0\') separator \'/\') as value from ( '
-            .. ' select @id := (select parent_post_id from post where id = @id) as parent_id, @n := @n+1 as n '
-            .. ' from (select @id := ?, @n := 0) _ '
-            .. ' straight_join post where @id is not null union select ?, 0 order by n desc) p ',
-        insert_id, insert_id)).value
+    local post_path = conn:execute('select post_id from (select @id := (select parent_post_id from post where id = @id) as post_id, @n := @n+1 as n '
+            .. ' from (select @id := ?, @n := 0) _ straight_join post where @id is not null '
+            .. ' union select ?, 0 order by n desc) p where post_id is not null', insert_id, insert_id)
+    local post_mpath = ''
+    for _, v in pairs(post_path) do
+        post_mpath = post_mpath .. '/' .. string.format("%011d", v.post_id)
+    end
+    if post_mpath == '' then
+        post_mpath = nil
+    end
+    local post_topmost_parent_id
+    if type(post_path) == 'table' and table.getn(post_path) > 1 then
+        post_topmost_parent_id = post_path[1].post_id
+    end
     --
-    conn:execute('update post set mpath = ? where id = ?', post_mpath, insert_id)
+    conn:execute('update post set mpath = ?, topmost_parent_post_id = ? where id = ?', post_mpath, post_topmost_parent_id, insert_id)
     local post = single_value(conn:execute('select * from post where id = last_insert_id()'))
     conn:commit()
     post.parent = post.parent_post_id
