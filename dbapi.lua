@@ -180,7 +180,6 @@ api_user_list_followers = function(args)
     if args.query_params.limit then
         followers_query = followers_query .. ' limit ' .. args.query_params.limit
     end
---    log.info(followers_query)
     local users = {}
     for _, v in pairs(conn:execute(followers_query)) do
         fetch_user_details(v)
@@ -215,7 +214,6 @@ api_user_list_following = function(args)
     if args.query_params.limit then
         followees_query = followees_query .. ' limit ' .. args.query_params.limit
     end
---    log.info(followees_query)
     local users = {}
     for _, v in pairs(conn:execute(followees_query)) do
         fetch_user_details(v)
@@ -400,7 +398,6 @@ api_forum_list_threads = function(args)
     if args.query_params.limit then
         threads_query = threads_query .. ' limit ' .. conn:quote(args.query_params.limit)
     end
-    log.info(threads_query)
     local threads = conn:execute(threads_query, forum.id)
     if args.query_params.related ~= nil then
         for _, thread in pairs(threads) do
@@ -759,9 +756,48 @@ api_thread_list = function(args)
     if args.query_params.limit then
         threads_query = threads_query .. ' limit ' .. conn:quote(args.query_params.limit)
     end
-    log.info(threads_query)
     local threads = conn:execute(threads_query)
     return create_response(ResultCode.Ok, threads)
+end
+
+__posts_query = function(thread_id, since)
+    local posts_query = 'select p.*, p.thread_id as thread, p.parent_post_id as parent, '
+            .. ' p.likes - p.dislikes as points, u.email as user, f.short_name as forum '
+            .. ' from post p join user u on p.user_id = u.id '
+            .. ' join forum f on p.forum_id = f.id '
+            .. ' join thread t on p.thread_id = t.id '
+            .. ' where t.id = ' .. tonumber(thread_id) .. ' '
+    if since then
+        posts_query = posts_query .. ' and p.date >= \'' .. conn:quote(since) .. '\' '
+    end
+    return posts_query
+end
+
+_get_posts = function(thread_id, since, topmost_parent_post_id)
+    local posts_query = __posts_query(thread_id, since)
+    posts_query = posts_query .. ' and p.topmost_parent_post_id = ' .. tonumber(topmost_parent_post_id) .. ' '
+    posts_query = posts_query .. ' order by mpath asc '
+    return conn:execute(posts_query)
+end
+
+_populate_posts_tree = function(posts, posts_query_topmost, limit, thread_id, since, sort)
+    local top_post_count = 0
+    for _, vtop in pairs(conn:execute(posts_query_topmost)) do
+        table.insert(posts, vtop)
+        top_post_count = top_post_count + 1
+        if limit and sort == 'tree' and table.getn(posts) >= tonumber(limit) then
+            return
+        end
+        for _, v in pairs(_get_posts(thread_id, since, vtop.id)) do
+            table.insert(posts, v)
+            if limit and sort == 'tree' and table.getn(posts) >= tonumber(limit) then
+                return
+            end
+        end
+        if limit and sort == 'parent_tree' and top_post_count >= tonumber(limit) then
+            return
+        end
+    end
 end
 
 api_thread_list_posts = function(args)
@@ -772,49 +808,25 @@ api_thread_list_posts = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    --
-    local posts_query = 'select p.*, p.thread_id as thread, p.parent_post_id as parent, '
-            .. ' p.likes - p.dislikes as points, u.email as user, f.short_name as forum '
-            .. ' from post p join user u on p.user_id = u.id '
-            .. ' join forum f on p.forum_id = f.id '
-            .. ' join thread t on p.thread_id = t.id '
-            .. ' where t.id = ? '
-    --
-    if args.query_params.since then
-        posts_query = posts_query .. ' and p.date >= \'' .. conn:quote(args.query_params.since) .. '\' '
-    end
-    --
-    if args.query_params.sort == 'parent_tree' then
-        local parent_posts_query = 'select id from post where parent_post_id is null and thread_id = ? '
-        if args.query_params.since then
-            parent_posts_query = parent_posts_query .. ' and date >= \'' .. conn:quote(args.query_params.since) .. '\' '
-        end
-        if args.query_params.limit then
-            parent_posts_query = parent_posts_query .. ' limit ' .. conn:quote(args.query_params.limit) .. ' '
-        end
-        local parent_post_ids = {}
-        for _, v in pairs(conn:execute(parent_posts_query, thread.id)) do
-            table.insert(parent_post_ids, v.id)
-        end
-        local parent_post_id_concat = table.concat(parent_post_ids, ',')
-        posts_query = posts_query .. ' and (p.id in (' .. parent_post_id_concat .. ') or p.topmost_parent_post_id in (' .. parent_post_id_concat .. ')) '
-    end
-    --
-    posts_query = posts_query .. ' order by null '
-    if args.query_params.sort and args.query_params.sort ~= 'flat' then
-        posts_query = posts_query ..', mpath ' .. conn:quote(args.query_params.order) .. ' '
+    local posts_query_topmost = __posts_query(thread.id, args.query_params.since)
+    local sort = args.query_params.sort
+    if sort == 'tree' or sort == 'parent_tree' then
+        posts_query_topmost = posts_query_topmost .. ' and p.parent_post_id is null '
     end
     if args.query_params.order then
-        posts_query = posts_query .. ', p.date ' .. conn:quote(args.query_params.order) .. ' '
+        posts_query_topmost = posts_query_topmost .. ' order by p.date ' .. conn:quote(args.query_params.order) .. ' '
+    end
+    local limit = args.query_params.limit
+    if limit then
+        posts_query_topmost = posts_query_topmost .. ' limit ' .. conn:quote(limit) .. ' '
+    end
+    local posts = {}
+    if sort == 'tree' or sort == 'parent_tree' then
+        _populate_posts_tree(posts, posts_query_topmost, limit, thread.id, args.query_params.since, sort)
     else
-        posts_query = posts_query .. ' desc '
+        posts = conn:execute(posts_query_topmost)
     end
-    local posts_query_body = ' '
-    if args.query_params.limit  and args.query_params.sort ~= 'parent_tree' then
-        posts_query = posts_query .. ' limit ' .. conn:quote(args.query_params.limit) .. ' '
-    end
-    log.info(string.gsub(posts_query, '%%','/'))
-    return create_response(ResultCode.Ok, conn:execute(posts_query, thread.id))
+    return create_response(ResultCode.Ok, posts)
 end
 
 server:route({ path = '/db/api/thread/create', method = 'POST' }, api_thread_create)
@@ -886,7 +898,7 @@ api_post_create = function(args)
     end
     --
     conn:execute('update post set mpath = ?, topmost_parent_post_id = ? where id = ?', post_mpath, post_topmost_parent_id, insert_id)
-    local post = single_value(conn:execute('select * from post where id = last_insert_id()'))
+    local post = single_value(conn:execute('select * from post where id = ?', insert_id))
     conn:commit()
     post.parent = post.parent_post_id
     post.parent_post_id = nil
@@ -913,7 +925,6 @@ api_post_details = function(args)
         else
             related_keys = args.query_params.related
         end
-        log.info(table.concat(related_keys, ','))
         for _, v in pairs(related_keys) do
             if v == 'user' then
                 fetch_single_related(post, 'user', 'user_id', 'id')
@@ -1067,7 +1078,6 @@ api_post_list = function(args)
     if args.query_params.limit then
         posts_query = posts_query .. ' limit ' .. conn:quote(args.query_params.limit) .. ' '
     end
-    log.info(posts_query)
     return create_response(ResultCode.Ok, conn:execute(posts_query))
 end
 
