@@ -4,8 +4,30 @@ box.cfg {}
 
 local json = require('json')
 local log = require('log')
-local conn = require('mysql').connect({ host = localhost, user = 'root', password = 'password', db = 'tempdb', raise = true })
 local server = require('http.server').new('*', 5000)
+local mysql = require('mysql')
+
+local conn
+local mysql_connect_opts = { host = localhost, user = 'root', password = 'password', db = 'tempdb', raise = true }
+local mysql_connect_max_retries = 10
+
+-- -- --
+local function check_open_conn(connect_opts, n_max)
+    local i = 0
+    repeat
+        if conn and not conn:ping() then
+            conn:close()
+            conn = nil
+        end
+        if not conn then
+            conn = mysql.connect(connect_opts)
+        end
+        i = i + 1
+    until (conn and conn:ping()) or i >= n_max
+    if i >= n_max and (not conn or not conn:ping()) then
+        error('Retry limit exceeded: ' .. tostring(i))
+    end
+end
 
 -- -- --
 
@@ -46,7 +68,7 @@ local function fetch_user_details(user)
     for _, v in pairs(conn:execute(query .. ' uf.follower_user_id = u.id where uf.followed_user_id = ?', user.id)) do
         table.insert(user.followers, v.email)
     end
-    user.subscriptions = {} -- todo: index
+    user.subscriptions = {}
     for _, v in pairs(conn:execute('select thread_id from usersubscription where user_id = ?', user.id)) do
         table.insert(user.subscriptions, v.thread_id)
     end
@@ -90,7 +112,6 @@ api_common_clear = function(args)
 end
 
 api_common_status = function(args)
-    -- todo: избавиться от count(*)
     local result = {}
     for _, v in pairs({ 'post', 'thread', 'forum', 'user' }) do
         result[v] = single_value(conn:execute('select count(*) as nrows from ' .. v)).nrows
@@ -172,13 +193,11 @@ api_user_list_followers = function(args)
         followers_query = followers_query .. v.follower_user_id .. ','
     end
     followers_query = followers_query .. '0)'
-    -- fixme: sql injection
     if args.query_params.order then
-        followers_query = followers_query .. ' order by name ' .. args.query_params.order
+        followers_query = followers_query .. ' order by name ' .. conn:quote(args.query_params.order)
     end
-    -- fixme: sql injection
     if args.query_params.limit then
-        followers_query = followers_query .. ' limit ' .. args.query_params.limit
+        followers_query = followers_query .. ' limit ' .. tonumber(args.query_params.limit)
     end
     local users = {}
     for _, v in pairs(conn:execute(followers_query)) do
@@ -206,13 +225,11 @@ api_user_list_following = function(args)
         followees_query = followees_query .. v.followed_user_id .. ','
     end
     followees_query = followees_query .. '0)'
-    -- fixme: sql injection
     if args.query_params.order then
-        followees_query = followees_query .. ' order by name ' .. args.query_params.order
+        followees_query = followees_query .. ' order by name ' .. conn:quote(args.query_params.order)
     end
-    -- fixme: sql injection
     if args.query_params.limit then
-        followees_query = followees_query .. ' limit ' .. args.query_params.limit
+        followees_query = followees_query .. ' limit ' .. tonumber(args.query_params.limit)
     end
     local users = {}
     for _, v in pairs(conn:execute(followees_query)) do
@@ -353,17 +370,15 @@ api_forum_list_users = function(args)
         return create_response(ResultCode.NotFound, 'forum')
     end
     local users_query = 'select distinct u.* from post p join forum f on p.forum_id = f.id join user u on p.user_id = u.id where f.id = ? '
-    -- fixme: sql injection
     if args.query_params.since_id then
-        users_query = users_query .. ' and u.id >= ' .. args.query_params.since_id
+        users_query = users_query .. ' and u.id >= ' .. tonumber(args.query_params.since_id)
     end
     users_query = users_query .. ' order by name '
-    -- fixme: sql injection
     if args.query_params.order then
-        users_query = users_query .. ' ' .. args.query_params.order .. ' '
+        users_query = users_query .. ' ' .. conn:quote(args.query_params.order) .. ' '
     end
     if args.query_params.limit then
-        users_query = users_query .. ' limit ' .. args.query_params.limit .. ' '
+        users_query = users_query .. ' limit ' .. tonumber(args.query_params.limit) .. ' '
     end
     local users = conn:execute(users_query, forum.id)
     for _, v in pairs(users) do
@@ -413,7 +428,6 @@ api_forum_list_threads = function(args)
                     fetch_user_details(thread.user)
                 elseif v == 'forum' then
                     fetch_single_related(thread, 'forum', 'forum_id', 'id')
-                    -- todo: убрать подпорку
                     thread.forum.user = single_value(conn:execute('select id,email from user where id = ?', thread.forum.user_id)).email
                 else
                     return create_response(ResultCode.MeaninglessRequest, {})
@@ -464,16 +478,12 @@ api_forum_list_posts = function(args)
                     fetch_user_details(post.user)
                 elseif v == 'forum' then
                     fetch_single_related(post, 'forum', 'forum_id', 'id')
-                    -- todo: убрать подпорку
                     post.forum.user = single_value(conn:execute('select id,email from user where id = ?', post.forum.user_id)).email
                 elseif v == 'thread' then
                     fetch_single_related(post, 'thread', 'thread_id', 'id')
-                    -- todo: убрать подпорки
                     post.thread.user = single_value(conn:execute('select id,email from user where id = ?', post.thread.user_id)).email
                     post.thread.forum = forum.short_name
-                    post.thread.posts = single_value(
-                        conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', post.thread.id)
-                    ).nposts
+                    post.thread.posts = single_value(conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', post.thread.id)).nposts
                     post.thread.points = post.thread.likes - post.thread.dislikes
                 else
                     return create_response(ResultCode.MeaninglessRequest, {})
@@ -540,7 +550,6 @@ api_thread_details = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, 'thread')
     end
-    -- todo: remove copy&paste
     if args.query_params.related ~= nil then
         local related_keys = {}
         if type(args.query_params.related) == 'string' then
@@ -563,10 +572,7 @@ api_thread_details = function(args)
             end
         end
     end
-    thread.posts = single_value(
-        conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', thread.id)
-    ).nposts
-    -- todo: переформулировать схему базы и убрать эти подпорки
+    thread.posts = single_value(conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', thread.id)).nposts
     if not thread.user then
         thread.user = single_value(conn:execute('select email from user where id = ?', thread.user_id)).email
     end
@@ -578,7 +584,6 @@ api_thread_details = function(args)
 end
 
 api_thread_close = function(args)
-    -- todo: убрать copy&paste
     if not keys_present(args.json, { 'thread' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
@@ -593,7 +598,6 @@ api_thread_close = function(args)
 end
 
 api_thread_open = function(args)
-    -- todo: убрать copy&paste
     if not keys_present(args.json, { 'thread' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
@@ -608,7 +612,6 @@ api_thread_open = function(args)
 end
 
 api_thread_remove = function(args)
-    -- todo: убрать copy&paste
     if not keys_present(args.json, { 'thread' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
@@ -624,7 +627,6 @@ api_thread_remove = function(args)
 end
 
 api_thread_restore = function(args)
-    -- todo: убрать copy&paste
     if not keys_present(args.json, { 'thread' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
@@ -640,7 +642,6 @@ api_thread_restore = function(args)
 end
 
 api_thread_subscribe = function(args)
-    -- todo: remove copy&paste
     if not keys_present(args.json, { 'user', 'thread' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
@@ -652,7 +653,6 @@ api_thread_subscribe = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, "thread")
     end
-    -- todo: пересмотреть
     pcall(function()
         conn:execute('insert into usersubscription (user_id, thread_id) values (?, ?)', user.id, thread.id)
     end)
@@ -660,7 +660,6 @@ api_thread_subscribe = function(args)
 end
 
 api_thread_unsubscribe = function(args)
-    -- todo: remove copy&paste
     if not keys_present(args.json, { 'user', 'thread' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
@@ -672,7 +671,6 @@ api_thread_unsubscribe = function(args)
     if not thread then
         return create_response(ResultCode.NotFound, "thread")
     end
-    -- todo: пересмотреть
     pcall(function()
         conn:execute('delete from usersubscription where user_id = ? and thread_id = ?', user.id, thread.id)
     end)
@@ -881,7 +879,6 @@ api_post_create = function(args)
         args.json.isApproved and 1 or 0, args.json.isHighlighted and 1 or 0,
         args.json.isEdited and 1 or 0, args.json.isSpam and 1 or 0, args.json.isDeleted and 1 or 0)
     local insert_id = single_value(conn:execute('select last_insert_id() as value')).value
-    -- fixme: hack
     local post_path = conn:execute('select post_id from (select @id := (select parent_post_id from post where id = @id) as post_id, @n := @n+1 as n '
             .. ' from (select @id := ?, @n := 0) _ straight_join post where @id is not null '
             .. ' union select ?, 0 order by n desc) p where post_id is not null', insert_id, insert_id)
@@ -917,7 +914,6 @@ api_post_details = function(args)
     end
     post.parent = post.parent_post_id
     post.parent_post_id = nil
-    -- todo: remove copy&paste
     if args.query_params.related then
         local related_keys = {}
         if type(args.query_params.related) == 'string' then
@@ -953,9 +949,7 @@ api_post_details = function(args)
                 end
                 post.thread.forum = thread_forum.short_name
                 post.thread.forum_id = nil
-                post.thread.posts = single_value(
-                    conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', post.thread.id)
-                ).nposts
+                post.thread.posts = single_value(conn:execute('select count(*) as nposts from post where not isDeleted and thread_id = ?', post.thread.id)).nposts
                 post.thread.points = post.thread.likes - post.thread.dislikes
             elseif v == 'forum' then
                 local forum_user = single_value(conn:execute('select email from user where id = ?', post.forum.user_id))
@@ -967,7 +961,6 @@ api_post_details = function(args)
             end
         end
     end
-    -- todo: переформулировать схему базы, убрать подпорки
     if not post.user then
         post.user = single_value(conn:execute('select email from user where id = ?', post.user_id)).email
     end
@@ -1015,7 +1008,6 @@ api_post_update = function(args)
     end
     conn:execute('update post set message = ? where id = ?', args.json.message, post.id)
     local updated_post = single_value(conn:execute('select * from post where id = ?', post.id))
-    -- todo: убрать подпорки
     updated_post.forum = single_value(conn:execute('select short_name from forum where id = ?', updated_post.forum_id)).short_name
     updated_post.user = single_value(conn:execute('select email from user where id = ?', updated_post.forum_id)).email
     updated_post.thread = updated_post.thread_id
@@ -1038,7 +1030,6 @@ api_post_vote = function(args)
         return create_response(ResultCode.MeaninglessRequest, 'vote')
     end
     local updated_post = single_value(conn:execute('select * from post where id = ?', post.id))
-    -- todo: убрать подпорки
     updated_post.forum = single_value(conn:execute('select short_name from forum where id = ?', updated_post.forum_id)).short_name
     updated_post.user = single_value(conn:execute('select email from user where id = ?', updated_post.forum_id)).email
     updated_post.thread = updated_post.thread_id
@@ -1056,13 +1047,13 @@ api_post_list = function(args)
         if not forum then
             create_response(ResultCode.NotFound, 'forum')
         end
-        posts_query  = posts_query .. ' where f.id = ' .. forum.id .. ' '
+        posts_query = posts_query .. ' where f.id = ' .. forum.id .. ' '
     elseif args.query_params.thread then
         local thread = single_value(conn:execute('select id from thread where id = ?', args.query_params.thread))
         if not thread then
             create_response(ResultCode.NotFound, 'thread')
         end
-        posts_query  = posts_query .. ' where t.id = ' .. thread.id .. ' '
+        posts_query = posts_query .. ' where t.id = ' .. thread.id .. ' '
     else
         return create_response(ResultCode.MeaninglessRequest, {})
     end
@@ -1092,6 +1083,7 @@ server:route({ path = '/db/api/post/vote', method = 'POST' }, api_post_vote)
 -- -- --
 
 server:hook('before_dispatch', function(self, request)
+    check_open_conn(mysql_connect_opts, mysql_connect_max_retries)
     local obj = {}
     if request.method ~= 'GET' then
         local status, err = pcall(function() obj.json = request:json() end)
@@ -1102,9 +1094,6 @@ server:hook('before_dispatch', function(self, request)
         obj.query_params = request:query_param(nil)
     end
     return obj
-end)
-server:hook('after_handler_error', function(self, request, request_override, err)
-    return create_response(ResultCode.UnknownError, err)
 end)
 server:hook('after_dispatch', function(self, request, request_override, response_data)
     return request:render({ json = response_data })
