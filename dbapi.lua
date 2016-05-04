@@ -1,11 +1,13 @@
 #!/usr/bin/env tarantool
 
+box.cfg {}
+
 local json = require('json')
 local log = require('log')
 local server = require('http.server').new('*', 5000)
 
 local mysql = require('mysql')
-local pool = mysql.pool_create({ host = '127.0.0.1', user = 'root', password = '11', db = 'tempdb', size = 42, raise = true })
+local pool = mysql.pool_create({ host = '127.0.0.1', user = 'root', password = '11', db = 'tempdb', size = 5, raise = true })
 
 -- -- --
 
@@ -1103,7 +1105,6 @@ server:route({ path = '/db/api/post/vote', method = 'POST' }, api_post_vote)
 -- -- --
 
 server:hook('before_dispatch', function(self, request)
-    collectgarbage()
     local obj = {}
     obj.conn = pool:get()
     if request.method ~= 'GET' then
@@ -1117,12 +1118,15 @@ server:hook('before_dispatch', function(self, request)
     return obj
 end)
 server:hook('after_dispatch', function(self, request, request_override, response_data)
-    pcall(function() pool:put(request.conn) end)
+    if request_override and request_override.conn then
+        pool:put(request_override.conn)
+    end
     return request:render({ json = response_data })
 end)
-
 server:hook('after_handler_error', function(self, request, request_override, err)
-    pcall(function() pool:put(request.conn) end)
+    if request_override and request_override.conn then
+        pool:put(request_override.conn)
+    end
     error(err)
 end)
 
