@@ -7,7 +7,7 @@ local log = require('log')
 local server = require('http.server').new('*', 5000)
 
 local mysql = require('mysql')
-local pool = mysql.pool_create({ host = '127.0.0.1', user = 'root', password = '11', db = 'tempdb', size = 5, raise = true })
+local pool = mysql.pool_create({ host = '127.0.0.1', user = 'root', password = '11', db = 'tempdb', size = 5 })
 
 -- -- --
 
