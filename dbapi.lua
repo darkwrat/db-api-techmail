@@ -485,7 +485,6 @@ api_forum_list_posts = function(args)
                     fetch_single_related(conn, post, 'thread', 'thread_id', 'id')
                     post.thread.user = single_value(conn_exec(conn, 'select id,email from user where id = ?', post.thread.user_id)).email
                     post.thread.forum = forum.short_name
-                    post.thread.posts = single_value(conn_exec(conn, 'select count(*) as nposts from post where not isDeleted and thread_id = ?', post.thread.id)).nposts
                     post.thread.points = post.thread.likes - post.thread.dislikes
                 else
                     return create_response(ResultCode.MeaninglessRequest, {})
@@ -576,7 +575,6 @@ api_thread_details = function(args)
             end
         end
     end
-    thread.posts = single_value(conn_exec(conn, 'select count(*) as nposts from post where not isDeleted and thread_id = ?', thread.id)).nposts
     if not thread.user then
         thread.user = single_value(conn_exec(conn, 'select email from user where id = ?', thread.user_id)).email
     end
@@ -628,7 +626,7 @@ api_thread_remove = function(args)
         return create_response(ResultCode.NotFound, 'thread')
     end
     conn_exec(conn, 'update post set isDeleted = 1 where thread_id = ?', thread.id)
-    conn_exec(conn, 'update thread set isDeleted = 1 where id = ?', thread.id)
+    conn_exec(conn, 'update thread set isDeleted = 1, posts = 0 where id = ?', thread.id)
     conn:commit()
     return create_response(ResultCode.Ok, { thread = thread.id })
 end
@@ -644,6 +642,7 @@ api_thread_restore = function(args)
         return create_response(ResultCode.NotFound, 'thread')
     end
     conn_exec(conn, 'update post set isDeleted = 0 where thread_id = ?', thread.id)
+    conn_exec(conn, 'update thread set posts = (select count(*) from post where thread_id = thread.id and isDeleted = 0) where id = ?', thread.id)
     conn_exec(conn, 'update thread set isDeleted = 0 where id = ?', thread.id)
     conn:commit()
     return create_response(ResultCode.Ok, { thread = thread.id })
@@ -912,6 +911,9 @@ api_post_create = function(args)
     --
     conn_exec(conn, 'update post set mpath = ?, topmost_parent_post_id = ? where id = ?', post_mpath, post_topmost_parent_id, insert_id)
     local post = single_value(conn_exec(conn, 'select * from post where id = ?', insert_id))
+    if not (args.json.isDeleted and true or false) then
+        conn_exec(conn, 'update thread set posts=posts+1 where id = ?', thread.id)
+    end
     conn:commit()
     post.parent = post.parent_post_id
     post.parent_post_id = nil
@@ -966,7 +968,6 @@ api_post_details = function(args)
                 end
                 post.thread.forum = thread_forum.short_name
                 post.thread.forum_id = nil
-                post.thread.posts = single_value(conn_exec(conn, 'select count(*) as nposts from post where not isDeleted and thread_id = ?', post.thread.id)).nposts
                 post.thread.points = post.thread.likes - post.thread.dislikes
             elseif v == 'forum' then
                 local forum_user = single_value(conn_exec(conn, 'select email from user where id = ?', post.forum.user_id))
@@ -996,11 +997,14 @@ api_post_remove = function(args)
     if not keys_present(args.json, { 'post' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
-    local post = single_value(conn_exec(conn, 'select id from post where id = ?', args.json.post))
+    local post = single_value(conn_exec(conn, 'select id, isDeleted, thread_id from post where id = ?', args.json.post))
     if not post then
         return create_response(ResultCode.NotFound, {})
     end
-    conn_exec(conn, 'update post set isDeleted = 1 where id = ?', post.id)
+    if post.isDeleted == 0 then
+        conn_exec(conn, 'update post set isDeleted = 1 where id = ?', post.id)
+        conn_exec(conn, 'update thread set posts=posts-1 where id = ?', post.thread_id)
+    end
     return create_response(ResultCode.Ok, { post = post.id })
 end
 
@@ -1009,11 +1013,14 @@ api_post_restore = function(args)
     if not keys_present(args.json, { 'post' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
-    local post = single_value(conn_exec(conn, 'select id from post where id = ?', args.json.post))
+    local post = single_value(conn_exec(conn, 'select id, isDeleted, thread_id from post where id = ?', args.json.post))
     if not post then
         return create_response(ResultCode.NotFound, {})
     end
-    conn_exec(conn, 'update post set isDeleted = 0 where id = ?', post.id)
+    if post.isDeleted == 1 then
+        conn_exec(conn, 'update post set isDeleted = 0 where id = ?', post.id)
+        conn_exec(conn, 'update thread set posts=posts+1 where id = ?', post.thread_id)
+    end
     return create_response(ResultCode.Ok, { post = post.id })
 end
 

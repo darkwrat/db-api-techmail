@@ -1,8 +1,8 @@
--- MySQL dump 10.13  Distrib 5.5.47, for debian-linux-gnu (x86_64)
+-- MySQL dump 10.13  Distrib 5.7.12, for Linux (x86_64)
 --
 -- Host: localhost    Database: tempdb
 -- ------------------------------------------------------
--- Server version	5.5.47-0ubuntu0.14.04.1
+-- Server version	5.7.12-0ubuntu1
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -28,6 +28,7 @@ CREATE TABLE `forum` (
   `short_name` varchar(255) NOT NULL,
   `user_id` int(11) NOT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `forum_name_uindex` (`name`),
   UNIQUE KEY `forum_short_name_uindex` (`short_name`),
   KEY `forum_user_id_fk` (`user_id`),
   CONSTRAINT `forum_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
@@ -59,28 +60,14 @@ CREATE TABLE `post` (
   `mpath` varchar(255) DEFAULT NULL,
   `topmost_parent_post_id` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `post_user_id_fk` (`user_id`),
-  KEY `post_forum_id_fk` (`forum_id`),
-  KEY `post_thread_id_fk` (`thread_id`),
-  KEY `post_post_id_fk` (`parent_post_id`),
+  KEY `post_date_index` (`date`),
+  KEY `post_forum_id_date_index` (`forum_id`,`date`),
+  KEY `post_thread_id_date_index` (`thread_id`,`date`),
+  KEY `post_user_id_date_index` (`user_id`,`date`),
   CONSTRAINT `post_forum_id_fk` FOREIGN KEY (`forum_id`) REFERENCES `forum` (`id`),
-  CONSTRAINT `post_post_id_fk` FOREIGN KEY (`parent_post_id`) REFERENCES `post` (`id`),
   CONSTRAINT `post_thread_id_fk` FOREIGN KEY (`thread_id`) REFERENCES `thread` (`id`),
   CONSTRAINT `post_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=31 DEFAULT CHARSET=latin1;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `temptable`
---
-
-DROP TABLE IF EXISTS `temptable`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `temptable` (
-  `a` int(11) DEFAULT NULL,
-  `b` int(11) DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=35 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -102,9 +89,11 @@ CREATE TABLE `thread` (
   `slug` varchar(255) NOT NULL,
   `likes` int(11) NOT NULL DEFAULT '0',
   `dislikes` int(11) NOT NULL DEFAULT '0',
+  `posts` int(11) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
-  KEY `thread_user_id_fk` (`user_id`),
-  KEY `thread_forum_id_fk` (`forum_id`),
+  KEY `thread_date_index` (`date`),
+  KEY `thread_forum_id_date_index` (`forum_id`,`date`),
+  KEY `thread_user_id_date_index` (`user_id`,`date`),
   CONSTRAINT `thread_forum_id_fk` FOREIGN KEY (`forum_id`) REFERENCES `forum` (`id`),
   CONSTRAINT `thread_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=latin1;
@@ -124,9 +113,10 @@ CREATE TABLE `user` (
   `username` varchar(255) DEFAULT NULL,
   `about` text,
   `isAnonymous` tinyint(1) NOT NULL DEFAULT '0',
-  `temp` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `user_email_uindex` (`email`)
+  UNIQUE KEY `user_email_uindex` (`email`),
+  KEY `user_name_index` (`name`),
+  KEY `user_id_name_index` (`id`,`name`)
 ) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -138,13 +128,15 @@ DROP TABLE IF EXISTS `userfollow`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `userfollow` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `follower_user_id` int(11) NOT NULL DEFAULT '0',
   `followed_user_id` int(11) NOT NULL DEFAULT '0',
-  PRIMARY KEY (`follower_user_id`,`followed_user_id`),
-  KEY `userfollows_user2_id_fk` (`followed_user_id`),
-  CONSTRAINT `userfollows_user2_id_fk` FOREIGN KEY (`followed_user_id`) REFERENCES `user` (`id`),
-  CONSTRAINT `userfollows_user_id_fk` FOREIGN KEY (`follower_user_id`) REFERENCES `user` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `userfollow_follower_user_id_followed_user_id_uindex` (`follower_user_id`,`followed_user_id`),
+  KEY `userfollow_followed_user_id_follower_user_id_index` (`followed_user_id`,`follower_user_id`),
+  CONSTRAINT `userfollow_user_id_fk` FOREIGN KEY (`follower_user_id`) REFERENCES `user` (`id`),
+  CONSTRAINT `userfollow_user_id_fk_2` FOREIGN KEY (`followed_user_id`) REFERENCES `user` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -155,13 +147,15 @@ DROP TABLE IF EXISTS `usersubscription`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `usersubscription` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
   `thread_id` int(11) NOT NULL,
-  PRIMARY KEY (`user_id`,`thread_id`),
-  KEY `usersubscriptions_thread_id_fk` (`thread_id`),
-  CONSTRAINT `usersubscriptions_thread_id_fk` FOREIGN KEY (`thread_id`) REFERENCES `thread` (`id`),
-  CONSTRAINT `usersubscriptions_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `usersubscription_user_id_thread_id_uindex` (`user_id`,`thread_id`),
+  KEY `usersubscription_thread_id_user_id_index` (`thread_id`,`user_id`),
+  CONSTRAINT `usersubscription_thread_id_fk` FOREIGN KEY (`thread_id`) REFERENCES `thread` (`id`),
+  CONSTRAINT `usersubscription_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -173,4 +167,4 @@ CREATE TABLE `usersubscription` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2016-04-11 10:44:38
+-- Dump completed on 2016-06-01 11:46:49
