@@ -32,7 +32,7 @@ CREATE TABLE `forum` (
   UNIQUE KEY `forum_short_name_uindex` (`short_name`),
   KEY `forum_user_id_fk` (`user_id`),
   CONSTRAINT `forum_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -67,7 +67,7 @@ CREATE TABLE `post` (
   CONSTRAINT `post_forum_id_fk` FOREIGN KEY (`forum_id`) REFERENCES `forum` (`id`),
   CONSTRAINT `post_thread_id_fk` FOREIGN KEY (`thread_id`) REFERENCES `thread` (`id`),
   CONSTRAINT `post_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=35 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -96,7 +96,7 @@ CREATE TABLE `thread` (
   KEY `thread_user_id_date_index` (`user_id`,`date`),
   CONSTRAINT `thread_forum_id_fk` FOREIGN KEY (`forum_id`) REFERENCES `forum` (`id`),
   CONSTRAINT `thread_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -117,7 +117,7 @@ CREATE TABLE `user` (
   UNIQUE KEY `user_email_uindex` (`email`),
   KEY `user_name_index` (`name`),
   KEY `user_id_name_index` (`id`,`name`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -136,7 +136,7 @@ CREATE TABLE `userfollow` (
   KEY `userfollow_followed_user_id_follower_user_id_index` (`followed_user_id`,`follower_user_id`),
   CONSTRAINT `userfollow_user_id_fk` FOREIGN KEY (`follower_user_id`) REFERENCES `user` (`id`),
   CONSTRAINT `userfollow_user_id_fk_2` FOREIGN KEY (`followed_user_id`) REFERENCES `user` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -155,7 +155,7 @@ CREATE TABLE `usersubscription` (
   KEY `usersubscription_thread_id_user_id_index` (`thread_id`,`user_id`),
   CONSTRAINT `usersubscription_thread_id_fk` FOREIGN KEY (`thread_id`) REFERENCES `thread` (`id`),
   CONSTRAINT `usersubscription_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
