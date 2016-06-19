@@ -4,12 +4,18 @@ box.cfg {}
 
 local json = require('json')
 local log = require('log')
-local server = require('http.server').new('*', 5000)
+local server = require('http.server').new('*', 8084)
 
 local mysql = require('mysql')
 local pool = mysql.pool_create({ host = '127.0.0.1', user = 'root', password = '11', db = 'tempdb', size = 5 })
 
 -- -- --
+
+local function reverse(tbl)
+    for i=1, math.floor(#tbl / 2) do
+        tbl[i], tbl[#tbl - i + 1] = tbl[#tbl - i + 1], tbl[i]
+    end
+end
 
 local function conn_exec(conn, ...)
     local result, _ = conn:execute(...)
@@ -894,27 +900,37 @@ api_post_create = function(args)
         args.json.isApproved and 1 or 0, args.json.isHighlighted and 1 or 0,
         args.json.isEdited and 1 or 0, args.json.isSpam and 1 or 0, args.json.isDeleted and 1 or 0)
     local insert_id = single_value(conn_exec(conn, 'select last_insert_id() as value')).value
-    local post_path = conn_exec(conn, 'select post_id from (select @id := (select parent_post_id from post where id = @id) as post_id, @n := @n+1 as n '
-            .. ' from (select @id := ?, @n := 0) _ straight_join post where @id is not null '
-            .. ' union select ?, 0 order by n desc) p where post_id is not null', insert_id, insert_id)
+    local post_path = {}
+    local post_it_id = parent_post.id
+    while post_it_id ~= nil do
+        table.insert(post_path, post_it_id)
+        local parent_post_it = single_value(conn_exec(conn, 'select parent_post_id from post where id = ?', post_it_id))
+        if parent_post_it then
+            post_it_id = parent_post_it.parent_post_id
+        else
+            post_it_id = nil
+        end
+    end
+    reverse(post_path)
+    table.insert(post_path, insert_id)
     local post_mpath = ''
     for _, v in pairs(post_path) do
-        post_mpath = post_mpath .. '/' .. string.format("%011d", v.post_id)
+        post_mpath = post_mpath .. '/' .. string.format("%011d", v)
     end
     if post_mpath == '' then
         post_mpath = nil
     end
     local post_topmost_parent_id
     if type(post_path) == 'table' and table.getn(post_path) > 1 then
-        post_topmost_parent_id = post_path[1].post_id
+        post_topmost_parent_id = post_path[1]
     end
     --
-    conn_exec(conn, 'update post set mpath = ?, topmost_parent_post_id = ? where id = ?', post_mpath, post_topmost_parent_id, insert_id)
-    local post = single_value(conn_exec(conn, 'select * from post where id = ?', insert_id))
     if not (args.json.isDeleted and true or false) then
         conn_exec(conn, 'update thread set posts=posts+1 where id = ?', thread.id)
     end
     conn:commit()
+    local post = single_value(conn_exec(conn, 'select * from post where id = ?', insert_id))
+    conn_exec(conn, 'update post set mpath = ?, topmost_parent_post_id = ? where id = ?', post_mpath, post_topmost_parent_id, insert_id)
     post.parent = post.parent_post_id
     post.parent_post_id = nil
     post.forum = forum.short_name
