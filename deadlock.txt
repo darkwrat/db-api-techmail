@@ -1,0 +1,72 @@
+------------------------
+LATEST DETECTED DEADLOCK
+------------------------
+2016-06-19 20:31:02 0x7ff5864b6700
+*** (1) TRANSACTION:
+TRANSACTION 5189441, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+LOCK WAIT 9 lock struct(s), heap size 1136, 4 row lock(s), undo log entries 1
+MySQL thread id 6, OS thread handle 140692497069824, query id 8912176 localhost 127.0.0.1 root updating
+update thread set posts=posts+1 where id = 7254
+*** (1) WAITING FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 38 page no 152 n bits 128 index PRIMARY of table `tempdb`.`thread` trx id 5189441 lock_mode X locks rec but not gap waiting
+Record lock, heap no 40 PHYSICAL RECORD: n_fields 14; compact format; info bits 0
+ 0: len 4; hex 80001c56; asc    V;;
+ 1: len 6; hex 0000004f1005; asc    O  ;;
+ 2: len 7; hex 640000013b0dd4; asc d   ;  ;;
+ 3: len 4; hex 80000001; asc     ;;
+ 4: len 1; hex 81; asc  ;;
+ 5: len 4; hex 800102d7; asc     ;;
+ 6: len 3; hex 6e6166; asc naf;;
+ 7: len 1; hex 81; asc  ;;
+ 8: len 5; hex 998fd54a32; asc    J2;;
+ 9: len 30; hex 7134387a203975303332203364656d2066357169676120377863676d7461; asc q48z 9u032 3dem f5qiga 7xcgmta; (total 185 bytes);
+ 10: len 6; hex 726c62796665; asc rlbyfe;;
+ 11: len 4; hex 80000000; asc     ;;
+ 12: len 4; hex 80000000; asc     ;;
+ 13: len 4; hex 80000014; asc     ;;
+
+*** (2) TRANSACTION:
+TRANSACTION 5189440, ACTIVE 0 sec starting index read
+mysql tables in use 1, locked 1
+9 lock struct(s), heap size 1136, 4 row lock(s), undo log entries 1
+MySQL thread id 7, OS thread handle 140692496803584, query id 8912179 localhost 127.0.0.1 root updating
+update thread set posts=posts+1 where id = 7254
+*** (2) HOLDS THE LOCK(S):
+RECORD LOCKS space id 38 page no 152 n bits 128 index PRIMARY of table `tempdb`.`thread` trx id 5189440 lock mode S locks rec but not gap
+Record lock, heap no 40 PHYSICAL RECORD: n_fields 14; compact format; info bits 0
+ 0: len 4; hex 80001c56; asc    V;;
+ 1: len 6; hex 0000004f1005; asc    O  ;;
+ 2: len 7; hex 640000013b0dd4; asc d   ;  ;;
+ 3: len 4; hex 80000001; asc     ;;
+ 4: len 1; hex 81; asc  ;;
+ 5: len 4; hex 800102d7; asc     ;;
+ 6: len 3; hex 6e6166; asc naf;;
+ 7: len 1; hex 81; asc  ;;
+ 8: len 5; hex 998fd54a32; asc    J2;;
+ 9: len 30; hex 7134387a203975303332203364656d2066357169676120377863676d7461; asc q48z 9u032 3dem f5qiga 7xcgmta; (total 185 bytes);
+ 10: len 6; hex 726c62796665; asc rlbyfe;;
+ 11: len 4; hex 80000000; asc     ;;
+ 12: len 4; hex 80000000; asc     ;;
+ 13: len 4; hex 80000014; asc     ;;
+
+*** (2) WAITING FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 38 page no 152 n bits 128 index PRIMARY of table `tempdb`.`thread` trx id 5189440 lock_mode X locks rec but not gap waiting
+Record lock, heap no 40 PHYSICAL RECORD: n_fields 14; compact format; info bits 0
+ 0: len 4; hex 80001c56; asc    V;;
+ 1: len 6; hex 0000004f1005; asc    O  ;;
+ 2: len 7; hex 640000013b0dd4; asc d   ;  ;;
+ 3: len 4; hex 80000001; asc     ;;
+ 4: len 1; hex 81; asc  ;;
+ 5: len 4; hex 800102d7; asc     ;;
+ 6: len 3; hex 6e6166; asc naf;;
+ 7: len 1; hex 81; asc  ;;
+ 8: len 5; hex 998fd54a32; asc    J2;;
+ 9: len 30; hex 7134387a203975303332203364656d2066357169676120377863676d7461; asc q48z 9u032 3dem f5qiga 7xcgmta; (total 185 bytes);
+ 10: len 6; hex 726c62796665; asc rlbyfe;;
+ 11: len 4; hex 80000000; asc     ;;
+ 12: len 4; hex 80000000; asc     ;;
+ 13: len 4; hex 80000014; asc     ;;
+
+*** WE ROLL BACK TRANSACTION (2)
+
