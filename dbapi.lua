@@ -874,10 +874,6 @@ api_post_create = function(args)
     if not keys_present(args.json, { 'date', 'thread', 'message', 'user', 'forum' }) then
         return create_response(ResultCode.MeaninglessRequest, {})
     end
-    local thread = single_value(conn_exec(conn, 'select id from thread where id = ?', args.json.thread))
-    if not thread then
-        return create_response(ResultCode.NotFound, 'thread')
-    end
     local forum = single_value(conn_exec(conn, 'select id,short_name from forum where short_name = ?', args.json.forum))
     if not forum then
         return create_response(ResultCode.NotFound, 'forum')
@@ -894,6 +890,11 @@ api_post_create = function(args)
         end
     end
     conn:begin()
+    local thread = single_value(conn_exec(conn, 'select id from thread where id = ? for update', args.json.thread))
+    if not thread then
+        conn:rollback()
+        return create_response(ResultCode.NotFound, 'thread')
+    end
     conn_exec(conn, 'insert into post(date, thread_id, message, user_id, forum_id, parent_post_id,' ..
             ' isApproved, isHighlighted, isEdited, isSpam, isDeleted) values(?,?,?,?,?,?,?,?,?,?,?)',
         args.json.date, thread.id, args.json.message, user.id, forum.id, parent_post.id,
