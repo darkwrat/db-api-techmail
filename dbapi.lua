@@ -929,8 +929,10 @@ api_post_create = function(args)
         conn_exec(conn, 'update thread set posts=posts+1 where id = ?', thread.id)
     end
     conn:commit()
-    local post = single_value(conn_exec(conn, 'select * from post where id = ?', insert_id))
+    conn:begin()
+    local post = single_value(conn_exec(conn, 'select * from post where id = ? for update', insert_id))
     conn_exec(conn, 'update post set mpath = ?, topmost_parent_post_id = ? where id = ?', post_mpath, post_topmost_parent_id, insert_id)
+    conn:commit()
     post.parent = post.parent_post_id
     post.parent_post_id = nil
     post.forum = forum.short_name
